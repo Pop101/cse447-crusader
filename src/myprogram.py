@@ -4,10 +4,17 @@ import string
 import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
-from src.modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
+from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
+from modules.dataloader import FixedLengthDataloader, NgramDataloader
+from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
+from modules.torchmodels import TransformerModel, CharTensorDataset, NgramCharTensorSet
+from torch.utils.data import DataLoader
+import torch
 
+combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
 
-TRAIN_DIR = './data-train'
+TRAIN_DIR = '/job/data/data-train'
+VAL_DIR   = '/job/data/data-val'
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
@@ -23,14 +30,20 @@ if __name__ == '__main__':
         if not os.path.isdir(args.work_dir):
             print('Making working directory {}'.format(args.work_dir))
             os.makedirs(args.work_dir)
+        
         print('Instatiating model')
-        model = UniformRandomPredictor()
+        model = UniformRandomPredictor(string.ascii_letters)
+        
         print('Loading training data')
-        train_data = []
+        train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
+        val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
+
         print('Training')
-        model.run_train(train_data, args.work_dir)
+        model.run_train(train_set, args.work_dir)
+        
         print('Saving model')
         model.save(args.work_dir)
+        
     elif args.mode == 'test':
         print('Loading model')
         model = UniformRandomPredictor.load(args.work_dir)

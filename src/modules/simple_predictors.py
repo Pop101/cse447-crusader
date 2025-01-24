@@ -12,9 +12,9 @@ class UniformRandomPredictor(AbstractPredictor):
     This is a dummy model that predicts a random character each time.
     """
 
-    def __init__(self, vocab:string.ascii_letters) -> None:
+    def __init__(self, vocab:str = string.ascii_letters) -> None:
         super().__init__()
-        self.vocab = vocab
+        self.vocab = set(vocab)
         
     def run_train(self, data, work_dir):
         self.vocab = set()
@@ -31,8 +31,8 @@ class UniformRandomPredictor(AbstractPredictor):
         return preds
 
     def save(self, work_dir):
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'wt') as f:
-            f.write(self.vocab)
+        with open(os.path.join(work_dir, 'model.checkpoint'), 'w') as f:
+            f.write(''.join(self.vocab))
 
     @classmethod
     def load(cls, work_dir):
@@ -45,7 +45,7 @@ class WeightedRandomPredictor(AbstractPredictor):
     This is a dummy model that predicts a random character each time, weighted by the frequency of the character in the training data.
     """
     
-    def __init__(self, vocab_weights:dict[str, int]) -> None:
+    def __init__(self, vocab_weights:dict) -> None:
         super().__init__()
         self.vocab_weights = vocab_weights
         

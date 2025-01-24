@@ -32,7 +32,7 @@ progress=0
 train_files=$(echo "$TXT_FILES" | head -n "$TRAIN_COUNT")
 echo "$train_files" | while IFS= read -r file; do
   mkdir -p ./data-train/$(dirname "$file")
-  ln -fs "$(realpath "./data/$file")" ./data-train/"$file"
+  ln -f "$(realpath "./data/$file")" ./data-train/"$file"
   ((progress++))
   printf "\rTraining files: %d/%d" "$progress" "$TRAIN_COUNT"
 done
@@ -43,7 +43,7 @@ val_files=$(echo "$TXT_FILES" | tail -n +"$((TRAIN_COUNT + 1))" | head -n "$VAL_
 progress=0
 echo "$val_files" | while IFS= read -r file; do
   mkdir -p ./data-val/$(dirname "$file")
-  ln -fs "$(realpath "./data/$file")" ./data-val/"$file"
+  ln -f "$(realpath "./data/$file")" ./data-val/"$file"
   ((progress++))
   printf "\rValidation files: %d/%d" "$progress" "$VAL_COUNT"
 done
@@ -54,7 +54,7 @@ test_files=$(echo "$TXT_FILES" | tail -n +"$((TRAIN_COUNT + VAL_COUNT + 1))")
 progress=0
 echo "$test_files" | while IFS= read -r file; do
   mkdir -p ./data-test/$(dirname "$file")
-  ln -fs "$(realpath "./data/$file")" ./data-test/"$file"
+  ln -f "$(realpath "./data/$file")" ./data-test/"$file"
   ((progress++))
   printf "\rTest files: %d/%d" "$progress" "$TEST_COUNT"  
 done

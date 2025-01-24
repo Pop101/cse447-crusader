@@ -5,7 +5,9 @@ from torch.utils.data import Dataset
 class CharTensorDataset(Dataset):
     """
     A dataset that loads a list of strings,
-    and returns individual tensors where each element is a 0-X index of a character
+    and returns two tensors where each element is a 0-X index of a character:
+    - The first tensor is the string without the last character
+    - The second tensor is the last character of the string
     """
     
     def __init__(self, strings):
@@ -23,7 +25,7 @@ class CharTensorDataset(Dataset):
                     idx = len(self.char_to_idx)
                     self.char_to_idx[char] = idx
                     self.idx_to_char[idx] = char
-            self.seq_length = max(self.seq_length, len(string))
+            self.seq_length = max(self.seq_length, len(string) - 1)
     
     def __len__(self):
         return len(self.strings)
@@ -39,12 +41,14 @@ class CharTensorDataset(Dataset):
     
     def __getitem__(self, idx):
         string = self.strings[idx]
-        return self.string_to_tensor(string)
+        return self.string_to_tensor(string[:-1]), self.string_to_tensor(string[-1:])
     
 class NgramCharTensorSet(Dataset):
     """
     A dataset that loads a list of ngrams (tuple of words),
-    and returns individual tensors where each element is a 0-X index of a character
+    and returns two tensors where each element is a 0-X index of a character
+    - The first tensor is the string without the last ngram
+    - The second tensor is the last ngram
     """
     
     def __init__(self, ngrams):
@@ -56,18 +60,26 @@ class NgramCharTensorSet(Dataset):
         assert hasattr(ngrams, "__iter__"), "strings must be a list"
         assert isinstance(ngrams[0][0], str), "ngrams must be a list/tuple of strings"
         
-        for ngram in self.ngrams:
-            gramlen = 0
+        for ngram in self.ngrams:            
+            # First, record all chars in ngram
             for onegram in ngram:
-                if gramlen > 0:
-                    gramlen += 1 # char for <break> (only if we actually need to break)
                 for char in onegram:
-                    gramlen += 1 # char for each character
                     if char not in self.char_to_idx:
                         idx = len(self.char_to_idx)
                         self.char_to_idx[char] = idx
                         self.idx_to_char[idx] = char
-            self.seq_length = max(self.seq_length, gramlen)
+            
+            # Now, record the length of the ngram
+            x_gramlen = 0
+            y_gramlen = 0
+            for onegram in ngram[:-1]:
+                if x_gramlen != 0:
+                    x_gramlen += 1
+                x_gramlen += len(onegram)
+            for onegram in ngram[-1]:
+                y_gramlen += len(onegram)                
+            
+            self.seq_length = max(self.seq_length, x_gramlen, y_gramlen)
         
     def __len__(self):
         return len(self.ngrams)
@@ -101,7 +113,7 @@ class NgramCharTensorSet(Dataset):
     
     def __getitem__(self, idx):
         ngram = self.ngrams[idx]
-        return self.ngram_to_tensor(ngram)
+        return self.ngram_to_tensor(ngram[:-1]), self.ngram_to_tensor(ngram[-1])
     
 
 class TransformerModel(nn.Module):

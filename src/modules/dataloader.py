@@ -1,6 +1,9 @@
 import os
 from datasets import IterableDataset
 import chardet
+import random
+import warnings
+
 class FileDataloader:
     """
     Loads data from text files in a directory, returning them as a dict or Dataset with entries: \n
@@ -91,3 +94,63 @@ class NgramDataloader(FileDataloader):
                 for ngram_size in self.ngram_sizes:
                     if len(word_stack) >= ngram_size:
                         yield {"ngram": tuple(word_stack[-ngram_size:]), "filename": data['filename']}
+
+class SymlinkTestTrainSplit:
+    """
+    Splits all txt files in a directory into any number of test/train sets,
+    creating new directories filled with symlinks to the original files.
+    
+    Note: to mitigate the relative cost of os.walk, this attempts to use an index.txt file at the root directory
+    """
+    
+    def __init__(self, directory, split_dictionary):
+        self.directory = directory
+        
+        total_weight = sum(split_dictionary.values())
+        self.split_dictionary = {k: v / total_weight for k, v in split_dictionary.items()}   
+        
+        index_file = os.path.join(self.directory, "index.txt")
+        if os.path.exists(index_file):
+            with open(index_file, 'r') as f:
+                self.index = [line.strip() for line in f if line.strip()]
+        else:
+            warnings.warn(f"No index.txt found in {self.directory}. Using os.walk to find files.")
+            self.index = []
+            for root, _, files in os.walk(self.directory):
+                for file in files:
+                    if file.endswith(".txt"):
+                        self.index.append(os.path.join(root, file))
+        
+        self.index = sorted(self.index)
+    
+    def split(self, random_state=None, shuffle=True):
+        if random_state is not None:
+            random.seed(random_state)
+        
+        idx = self.index.copy()
+        if shuffle:
+            random.shuffle(idx)
+        
+        # Calculate the number of files for each split
+        split_counts = {k: int(v * len(idx)) for k, v in self.split_dictionary.items()}
+        
+        remaining = len(idx) - sum(split_counts.values())
+        last_key = list(self.split_dictionary.keys())[-1]
+        split_counts[last_key] += remaining
+        
+        # Create directories and distribute files
+        file_assignments = dict.fromkeys(self.split_dictionary.keys(), [])
+        start = 0
+        for split_name, count in split_counts.items():
+            end = start + count
+            file_assignments[split_name].extend(idx[start:end])
+            start = end
+        
+        # Create symlinks in respective directories
+        for split_name, files in file_assignments.items():
+            split_dir = os.path.join(self.directory, split_name)
+            os.makedirs(split_dir, exist_ok=True)
+            for file_path in files:
+                symlink_path = os.path.join(split_dir, file_path)
+                if not os.path.exists(symlink_path):
+                    os.symlink(file_path, symlink_path)

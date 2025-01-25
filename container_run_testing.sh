@@ -1,6 +1,14 @@
 
 #!/bin/bash
 
+# Find docker or use podman
+DOCKER=$(which docker || which podman)
+if [ -z "$DOCKER" ]; then
+    echo "No docker or podman found"
+    exit 1
+fi
+alias docker=$DOCKER
+
 docker build -t cse447-container .
 
 # use your brain when linking the directories

@@ -17,7 +17,9 @@ docker build -t cse447-container .
 docker run                                          \
     -v $PWD/src:/job/src                            \
     -v $PWD/work:/job/work                          \
-    -v /gscratch/stf/lleibm/gutenberg:/job/data/    \
+    -v ./data:/job/data/data                        \
+    -v ./data-train:/job/data/data/data-train       \
+    -v ./data-val:/job/data/data/data-val           \
     -v $PWD/output:/job/output                      \
     cse447-container                                \
     $@

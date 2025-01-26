@@ -8,7 +8,7 @@ from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPred
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
 from modules.torchmodels import TransformerModel, CharTensorDataset, NgramCharTensorSet
-from modules.torchgpu import device
+#from modules.torchgpu import device
 import torch
 
 combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     random.seed(0)
     
-    print("Running in {}".format(device))
+    #print("Running in {}".format(device))
 
     if args.mode == 'train':
         if not os.path.isdir(args.work_dir):

@@ -3,6 +3,7 @@ from datasets import IterableDataset
 import chardet
 import random
 import warnings
+from tqdm.auto import tqdm
 
 class FileDataloader:
     """
@@ -137,20 +138,35 @@ class SymlinkTestTrainSplit:
         remaining = len(idx) - sum(split_counts.values())
         last_key = list(self.split_dictionary.keys())[-1]
         split_counts[last_key] += remaining
-        
+                
         # Create directories and distribute files
         file_assignments = dict.fromkeys(self.split_dictionary.keys(), [])
-        start = 0
         for split_name, count in split_counts.items():
-            end = start + count
-            file_assignments[split_name].extend(idx[start:end])
-            start = end
+            file_assignments[split_name] = idx[:count]
+            idx = idx[count:]
+        file_assignments[last_key] += idx
         
         # Create symlinks in respective directories
         for split_name, files in file_assignments.items():
             split_dir = os.path.join(self.directory, split_name)
             os.makedirs(split_dir, exist_ok=True)
-            for file_path in files:
+            
+            # Check files against existing index.txt
+            index_file = os.path.join(split_dir, "index.txt")
+            if os.path.exists(index_file):
+                with open(index_file, 'r') as f:
+                    existing_files = [line.strip() for line in f if line.strip()]
+                files = [f for f in files if f not in existing_files]
+            
+            # Symlink all files
+            for file_path in tqdm(files, desc=f"Creating symlinks for {split_name}"):
                 symlink_path = os.path.join(split_dir, file_path)
-                if not os.path.exists(symlink_path):
-                    os.symlink(file_path, symlink_path)
+                if os.path.exists(symlink_path) or os.path.islink(symlink_path):
+                    continue
+                os.makedirs(os.path.dirname(symlink_path), exist_ok=True)
+                os.symlink(file_path, symlink_path)
+            
+            # Make index.txt for this split
+            with open(os.path.join(split_dir, "index.txt"), 'w') as f:
+                for file in files:
+                    f.write(file + '\n')

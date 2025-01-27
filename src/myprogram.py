@@ -13,9 +13,9 @@ import torch
 
 combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
 
-DATA_DIR  = '/job/data/data'
-TRAIN_DIR = '/job/data/data/data-train'
-VAL_DIR   = '/job/data/data/data-val'
+DATA_DIR  = '/job/data/data-all'
+TRAIN_DIR = '/job/data/data-train'
+VAL_DIR   = '/job/data/data-val'
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
@@ -35,14 +35,14 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
         
         print('Instatiating model')
-        model = UniformRandomPredictor(string.ascii_letters)
+        model = WeightedRandomPredictor(string.ascii_letters)
         
         print('Performing Test/Train Split')
         splitter  = SymlinkTestTrainSplit(DATA_DIR, {
             TRAIN_DIR: 0.75,
             VAL_DIR: 0.25
         })
-        splitter.split(random_state=42)
+        splitter.split(random_state=42)        
                                           
         print('Loading training data')
         train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])

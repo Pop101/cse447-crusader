@@ -4,6 +4,7 @@ import chardet
 import random
 import warnings
 from tqdm.auto import tqdm
+from itertools import chain
 
 class FileDataloader:
     """
@@ -20,11 +21,15 @@ class FileDataloader:
         return IterableDataset.from_generator(lambda: iter(self))
     
     def _encoding_ambivalent_load(self, file_path):
-        with open(file_path, 'rb') as file:
-            raw_data = file.read()
-            encoding = chardet.detect(raw_data)['encoding'] or 'utf-8'
-            raw_data = raw_data.decode(encoding)
-        return raw_data
+        try:
+            with open(file_path, 'rb') as file:
+                raw_data = file.read()
+                encoding = chardet.detect(raw_data)['encoding'] or 'utf-8'
+                raw_data = raw_data.decode(encoding)
+            return raw_data
+        except "FileNotFoundError":
+            print(f"File {file_path} not found.")
+            return ""
     
     def __iter__(self):
         for root, _, files in os.walk(self.directory):
@@ -153,6 +158,7 @@ class SymlinkTestTrainSplit:
             
             # Check files against existing index.txt
             index_file = os.path.join(split_dir, "index.txt")
+            existing_files = []
             if os.path.exists(index_file):
                 with open(index_file, 'r') as f:
                     existing_files = [line.strip() for line in f if line.strip()]
@@ -161,12 +167,14 @@ class SymlinkTestTrainSplit:
             # Symlink all files
             for file_path in tqdm(files, desc=f"Creating symlinks for {split_name}"):
                 symlink_path = os.path.join(split_dir, file_path)
+                original_path = os.path.join(self.directory, file_path)
+                
                 if os.path.exists(symlink_path) or os.path.islink(symlink_path):
                     continue
                 os.makedirs(os.path.dirname(symlink_path), exist_ok=True)
-                os.symlink(file_path, symlink_path)
+                os.symlink(original_path, symlink_path)
             
             # Make index.txt for this split
             with open(os.path.join(split_dir, "index.txt"), 'w') as f:
-                for file in files:
+                for file in chain(files, existing_files):
                     f.write(file + '\n')

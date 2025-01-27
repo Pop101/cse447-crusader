@@ -17,9 +17,9 @@ docker build -t cse447-container .
 docker run                                          \
     -v $PWD/src:/job/src                            \
     -v $PWD/work:/job/work                          \
-    -v ./data:/job/data/data                        \
-    -v ./data-train:/job/data/data/data-train       \
-    -v ./data-val:/job/data/data/data-val           \
+    -v ./data:/job/data/data-all                    \
+    -v ./data-train:/job/data/data-train            \
+    -v ./data-val:/job/data/data-val                \
     -v $PWD/output:/job/output                      \
     cse447-container                                \
     $@

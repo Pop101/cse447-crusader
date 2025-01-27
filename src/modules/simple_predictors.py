@@ -31,12 +31,12 @@ class UniformRandomPredictor(AbstractPredictor):
         return preds
 
     def save(self, work_dir):
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'w') as f:
+        with open(os.path.join(work_dir, 'UniformRandomPredictor.checkpoint'), 'w') as f:
             f.write(''.join(self.vocab))
 
     @classmethod
     def load(cls, work_dir):
-        with open(os.path.join(work_dir, 'model.checkpoint')) as f:
+        with open(os.path.join(work_dir, 'UniformRandomPredictor.checkpoint')) as f:
             vocab = f.read()
         return UniformRandomPredictor(vocab=vocab)
     
@@ -66,11 +66,11 @@ class WeightedRandomPredictor(AbstractPredictor):
         return preds
     
     def save(self, work_dir):
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'wt') as f:
+        with open(os.path.join(work_dir, 'WeightedRandomPredictor.checkpoint'), 'wt') as f:
             json.dump(self.vocab_weights, f)
     
     @classmethod
     def load(cls, work_dir):
-        with open(os.path.join(work_dir, 'model.checkpoint')) as f:
+        with open(os.path.join(work_dir, 'WeightedRandomPredictor.checkpoint')) as f:
             vocab_weights = json.load(f)
         return WeightedRandomPredictor(vocab_weights=vocab_weights)

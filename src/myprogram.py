@@ -83,13 +83,20 @@ if __name__ == '__main__':
     elif args.mode == 'test':
         print('Loading model')
         model = WeightedRandomPredictor.load(args.work_dir)
+        
         print('Loading test data from {}'.format(args.test_data))
-        test_data = [] # Load data from here: args.test_data
+        test_data = []
+        with open(args.test_data) as f:
+            for line in f:
+                test_data.append(line.strip())
+        
         print('Making predictions')
         pred = model.run_pred(test_data)
+        
         print('Writing predictions to {}'.format(args.test_output))
         assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))
         model.write_pred(pred, args.test_output)
+    
     elif args.mode == 'tui':
         print('Loading model')
         model = WeightedRandomPredictor.load(args.work_dir)

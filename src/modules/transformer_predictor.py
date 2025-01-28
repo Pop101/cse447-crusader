@@ -4,7 +4,7 @@ import torch
 import os
 import pickle
 
-class CharTensorDataset(AbstractPredictor):
+class TransformerPredictor(AbstractPredictor):
     def __init__(self) -> None:
         super().__init__()
         self.model = None

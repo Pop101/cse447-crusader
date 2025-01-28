@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
 class CharTensorDataset(Dataset):
     """
@@ -11,21 +12,19 @@ class CharTensorDataset(Dataset):
     """
     
     def __init__(self, strings):
-        self.strings = strings
+        self.strings = list()
         self.seq_length = 0
         self.char_to_idx = {'<pad>': 0, '<break>': 1}
         self.idx_to_char = {0: '<pad>', 1: '<break>'}
         
-        assert hasattr(strings, "__iter__"), "strings must be a list"
-        assert isinstance(strings[0], str), "strings must be a list of strings"
-        
-        for string in self.strings:
+        for string in tqdm(strings, desc="Building dataset..."):
             for char in string:
                 if char not in self.char_to_idx:
                     idx = len(self.char_to_idx)
                     self.char_to_idx[char] = idx
                     self.idx_to_char[idx] = char
             self.seq_length = max(self.seq_length, len(string) - 1)
+            self.strings.append(string)
     
     def __len__(self):
         return len(self.strings)
@@ -52,15 +51,12 @@ class NgramCharTensorSet(Dataset):
     """
     
     def __init__(self, ngrams):
-        self.ngrams = ngrams
+        self.ngrams = list()
         self.seq_length = 0
         self.char_to_idx = {'<pad>': 0, '<break>': 1}
         self.idx_to_char = {0: '<pad>', 1: '<break>'}
         
-        assert hasattr(ngrams, "__iter__"), "strings must be a list"
-        assert isinstance(ngrams[0][0], str), "ngrams must be a list/tuple of strings"
-        
-        for ngram in self.ngrams:            
+        for ngram in tqdm(ngrams, desc="Building dataset..."):            
             # First, record all chars in ngram
             for onegram in ngram:
                 for char in onegram:
@@ -80,6 +76,7 @@ class NgramCharTensorSet(Dataset):
                 y_gramlen += len(onegram)                
             
             self.seq_length = max(self.seq_length, x_gramlen, y_gramlen)
+            self.ngrams.append(ngram)
         
     def __len__(self):
         return len(self.ngrams)

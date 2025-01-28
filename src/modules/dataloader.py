@@ -27,14 +27,14 @@ class FileDataloader:
                 encoding = chardet.detect(raw_data)['encoding'] or 'utf-8'
                 raw_data = raw_data.decode(encoding)
             return raw_data
-        except "FileNotFoundError":
+        except FileNotFoundError:
             print(f"File {file_path} not found.")
             return ""
     
     def __iter__(self):
         for root, _, files in os.walk(self.directory):
             for file in files:
-                if file.endswith(".txt"):  # Process only .txt files
+                if file.endswith(".txt") and not file.endswith("index.txt"):
                     file_path = os.path.join(root, file)
                     text = self._encoding_ambivalent_load(file_path)
                     for filter in self.filters:

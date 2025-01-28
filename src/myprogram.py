@@ -80,13 +80,14 @@ if __name__ == '__main__':
         
     elif args.mode == 'test':
         print('Loading model')
-        model = WeightedRandomPredictor.load(args.work_dir)
+        model = TransformerPredictor.load(args.work_dir)
         
         print('Loading test data from {}'.format(args.test_data))
         test_data = []
         with open(args.test_data) as f:
             for line in f:
-                test_data.append(line.strip())
+                test_data.append(combined_normalizer(line))
+
         
         print('Making predictions')
         pred = model.run_pred(test_data)

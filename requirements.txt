@@ -4,4 +4,3 @@ pandas<3.0.0
 async-timeout
 nltk
 chardet
-torch==2.4.1

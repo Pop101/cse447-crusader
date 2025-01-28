@@ -5,7 +5,8 @@ import os
 import pickle
 from tqdm.auto import tqdm
 from modules.torchgpu import device
-
+import random
+import string
 class TransformerPredictor(AbstractPredictor):
     def __init__(self) -> None:
         super().__init__()
@@ -25,7 +26,7 @@ class TransformerPredictor(AbstractPredictor):
         train_set = list(map(lambda x: (x[0].to(device), x[1].to(device)), train_set_loader)) # send to GPU
         
         # Train the model
-        num_epochs = 10
+        num_epochs = 1
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=1e-5)
         criterion = torch.nn.CrossEntropyLoss()
         for epoch in range(num_epochs):
@@ -48,10 +49,17 @@ class TransformerPredictor(AbstractPredictor):
         with torch.no_grad():
             preds = []
             for item in data:
-                in_tensor = self.dataset.ngram_to_tensor(item)
-                output = self.model(in_tensor)
-                print(output)
-                top_n_values, top_n_indices = torch.topk(output, 3, dim=-1)
+                try:
+                    in_tensor = self.dataset.string_to_tensor(item)
+                    in_tensor = in_tensor.unsqueeze(0).to(device)
+                    output = self.model(in_tensor)
+                    top_n_values, top_n_indices = torch.topk(output, 3, dim=-1)
+                    top_n_chars = [self.dataset.idx_to_char[idx.item()] for idx in top_n_indices.squeeze()]
+                    preds.append("".join(top_n_chars))
+                except KeyError:
+                    preds.append("".join(random.choices(string.ascii_letters, k=3)))
+                    print(f"Warning: Unseen character in input \"{item}\". Replacing with random prediction.")
+                    continue
         return preds
 
     def save(self, work_dir):

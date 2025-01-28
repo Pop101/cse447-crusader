@@ -14,6 +14,7 @@ fi
 # use your brain when linking the directories
 # The following should work for training & val, not for testing
 "$DOCKER" run                        \
+    --gpus all                       \
     -v $PWD/src:/job/src             \
     -v $PWD/work:/job/work           \
     -v ./data-test:/job/data         \

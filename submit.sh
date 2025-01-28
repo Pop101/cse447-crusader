@@ -25,4 +25,4 @@ cp -r src submit/src
 cp -r work submit/work
 
 # make zip file
-zip -r submit.zip submit
+zip -r Project447Group3.zip submit

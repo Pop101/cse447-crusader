@@ -15,6 +15,7 @@ docker build -t cse447-container .
 # The following should work for training & val ON HYAK, not for testing
 # On Leon's machine, add -v /mnt/e/data/gutenberg:/mnt/e/data/gutenberg to fix symlink hell
 docker run                                          \
+    --gpus all                                      \
     -v $PWD/src:/job/src                            \
     -v $PWD/work:/job/work                          \
     -v ./data:/job/data/data-all                    \

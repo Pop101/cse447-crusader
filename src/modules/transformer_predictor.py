@@ -3,6 +3,8 @@ from modules.torchmodels import TransformerModel, CharTensorDataset, NgramCharTe
 import torch
 import os
 import pickle
+from tqdm.auto import tqdm
+from modules.torchgpu import device
 
 class TransformerPredictor(AbstractPredictor):
     def __init__(self) -> None:
@@ -13,22 +15,25 @@ class TransformerPredictor(AbstractPredictor):
         self.dataset = CharTensorDataset(data)
         self.model = TransformerModel(
             vocab_size=len(self.dataset.char_to_idx),
+            tensor_length=self.dataset.seq_length,
             embed_size=512,
             num_heads=8,
             num_layers=6
         )
         
         train_set_loader = torch.utils.data.DataLoader(self.dataset, batch_size=32, shuffle=True)
-
+        train_set = list(map(lambda x: (x[0].to(device), x[1].to(device)), train_set_loader)) # send to GPU
+        
         # Train the model
         num_epochs = 10
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=1e-5)
         criterion = torch.nn.CrossEntropyLoss()
         for epoch in range(num_epochs):
             self.model.train()
-            for batch in train_set_loader:
+            for batch in tqdm(train_set, desc=f"Epoch {epoch+1}/{num_epochs}"):
                 input, target = batch
                 optimizer.zero_grad()
+                input = input.unsqueeze(0)
                 
                 # Forward
                 output = self.model(input)

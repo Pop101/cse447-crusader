@@ -40,7 +40,7 @@ class CharTensorDataset(Dataset):
     
     def __getitem__(self, idx):
         string = self.strings[idx]
-        return self.string_to_tensor(string[:-1]), self.string_to_tensor(string[-1:])
+        return self.string_to_tensor(string[:-1]), self.char_to_idx[string[-1]]
     
 class NgramCharTensorSet(Dataset):
     """
@@ -114,26 +114,48 @@ class NgramCharTensorSet(Dataset):
     
 
 class TransformerModel(nn.Module):
-    def __init__(self, vocab_size, embed_size, num_heads, num_layers):
+    def __init__(self, vocab_size, tensor_length, embed_size, num_heads, num_layers):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.pos_embedding = nn.Embedding(1000, embed_size)
+        self.pos_embedding = nn.Embedding(tensor_length, embed_size)
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(embed_size, num_heads), num_layers
         )
         self.fc = nn.Linear(embed_size, vocab_size)
         
     def forward(self, x):
-        positions = torch.arange(0, x.size(1), device=x.device).unsqueeze(0)
-        x = self.embedding(x) + self.pos_embedding(positions)
-        mask = self._generate_padding_mask(x)
-        x = self.transformer(x.permute(1, 0, 2), src_key_padding_mask=mask)
+        # Remove extra dimension if present
+        if len(x.shape) > 2:
+            x = x.squeeze()
+        
+        batch_size = x.size(0)
+        seq_len = x.size(1)
+        
+        # Create positions tensor
+        positions = torch.arange(0, seq_len, device=x.device)
+        positions = positions.unsqueeze(0).expand(batch_size, -1)
+        
+        # Word embeddings: (batch_size, seq_len, embed_size)
+        word_embeddings = self.embedding(x)
+        
+        # Position embeddings: (batch_size, seq_len, embed_size)
+        pos_embeddings = self.pos_embedding(positions)
+        
+        # Combine embeddings
+        x = word_embeddings + pos_embeddings
+        
+        # Generate padding mask - check original input for padding tokens
+        # Mask should be (batch_size, seq_len) where True indicates positions to be masked
+        padding_mask = (x == 0).any(dim=-1)
+        
+        # Permute for transformer: (seq_len, batch_size, embed_size)
+        x = x.permute(1, 0, 2)
+        
+        # Transform with attention mask
+        x = self.transformer(x, src_key_padding_mask=padding_mask)
+        
+        # Get the last sequence element for classification
         return self.fc(x[-1])
-
-    def _generate_padding_mask(self, x):
-        # NOTE: this padding mask is dependent on the default <pad> token = 0
-        # This is NO GOOD VERY BAD style
-        return (x[:, :, 0] == 0).T
 
 if __name__ == "__main__":
     ngrams = [

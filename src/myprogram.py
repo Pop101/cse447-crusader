@@ -8,8 +8,10 @@ from tqdm.auto import tqdm
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
-from modules.torchmodels import TransformerModel, CharTensorDataset, NgramCharTensorSet
-#from modules.torchgpu import device
+from modules.torchmodels import CharTensorDataset, NgramCharTensorSet
+from modules.transformer_predictor import TransformerPredictor
+
+from modules.torchgpu import device
 import torch
 import pandas as pd
 
@@ -64,18 +66,14 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
         
         print('Instatiating model')
-        model = WeightedRandomPredictor(string.ascii_letters)
+        model = TransformerPredictor()
         
         print('Loading Data')
         train_set = pd.read_pickle(os.path.join(args.work_dir, 'train.tar.gz'))['text']
         val_set   = pd.read_pickle(os.path.join(args.work_dir, 'val.tar.gz'))['text']
-        
-        print("Learning Tensors")
-        # train_set = CharTensorDataset(tqdm(train_set))
-        # val_set   = CharTensorDataset(tqdm(val_set))
 
         print('Training')
-        model.run_train(tqdm(train_set), args.work_dir)
+        model.run_train(train_set, args.work_dir)
         
         print('Saving model')
         model.save(args.work_dir)

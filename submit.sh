@@ -9,10 +9,11 @@ mkdir -p submit
 printf "Leon Leibmann,lleibm\nNandini Talukdar,nandit\nKasten Welsh,kwelsh1" > submit/team.txt
 
 # train model (takes FOREVER)
-python src/myprogram.py train --work_dir work
+sudo ./container_run.sh python src/myprogram.py prepare --work_dir work
+sudo ./container_run.sh python src/myprogram.py train   --work_dir work
 
 # make predictions on example data submit it in pred.txt
-python src/myprogram.py test --work_dir work --test_data example/input.txt --test_output submit/pred.txt
+sudo ./container_run_testing.sh python src/myprogram.py test --work_dir work --test_data /job/data/example/input.txt --test_output submit/pred.txt
 
 # submit docker file
 cp Dockerfile submit/Dockerfile

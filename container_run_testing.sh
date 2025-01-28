@@ -19,5 +19,6 @@ fi
     -v ./data-test:/job/data         \
     -v ./example:/job/data/example   \
     -v $PWD/output:/job/output       \
+    -v $PWD/submit:/job/submit       \
     cse447-container                 \
     $@

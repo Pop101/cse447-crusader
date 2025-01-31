@@ -27,7 +27,7 @@ class FileDataloader:
                 encoding = chardet.detect(raw_data)['encoding'] or 'utf-8'
                 raw_data = raw_data.decode(encoding)
             return raw_data
-        except FileNotFoundError:
+        except (FileNotFoundError, UnicodeDecodeError):
             print(f"File {file_path} not found.")
             return ""
     
@@ -150,10 +150,10 @@ class SymlinkTestTrainSplit:
             file_assignments[split_name] = idx[:count]
             idx = idx[count:]
         file_assignments[last_key] += idx
-        
+                
         # Create symlinks in respective directories
         for split_name, files in file_assignments.items():
-            split_dir = os.path.join(self.directory, split_name)
+            split_dir = split_name
             os.makedirs(split_dir, exist_ok=True)
             
             # Check files against existing index.txt

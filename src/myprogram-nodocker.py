@@ -10,20 +10,21 @@ from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTe
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet
 from modules.transformer_predictor import TransformerPredictor
+from modules.datawriter import chunker, stream_to_single_parquet
 
 from modules.torchgpu import device
 import torch
 import pandas as pd
 from itertools import islice
 
+
 combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
 
-DATA_DIR  = '/job/data/data-all'
-TRAIN_DIR = '/job/data/data-train'
-VAL_DIR   = '/job/data/data-val'
+DATA_DIR  = '/mnt/e/data/gutenberg'
+TRAIN_DIR = './data-train'
+VAL_DIR   = './data-val'
 
 limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
-chunker = lambda it, chunk_size: iter(lambda: list(islice(it, chunk_size)), [])
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
@@ -52,24 +53,22 @@ if __name__ == '__main__':
         train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
         val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
 
-        train_set = limerator(train_set, 1000_000)
-        val_set   = limerator(val_set, 1000_000)
+        # Limit to first 1m
+        # train_set = limerator(train_set, 10_000)
+        # val_set   = limerator(val_set, 10_000)
         
-        # TODO: stream iterator to disk
-        output_path = os.path.join(args.work_dir, 'train.parquet')
-        first_chunk = True
-        for chunk in tqdm(chunker(train_set, 10_000)):
-            df = pd.DataFrame({'text': chunk})
-            if first_chunk:
-                df.to_parquet(output_path, compression='snappy')
-                first_chunk = False
-            else:
-                df.to_parquet(output_path, compression='snappy', append=True)
+        # Transform to chunks, then to pandas
+        train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, 1_000))
+        val_set   = map(lambda x: pd.DataFrame(x), chunker(val_set, 1_000))
         
-        print(pd.read_pickle(os.path.join(args.work_dir, output_path)))
+        # Stream iterator to disk
+        train_file = os.path.join(args.work_dir, 'train.parquet')
+        val_file   = os.path.join(args.work_dir, 'val.parquet')
+        stream_to_single_parquet(train_set, train_file)
+        stream_to_single_parquet(val_set, val_file)
         
-        print("Data saved to {}".format(args.work_dir))
-        print("Size of training set:\t{}mb".format(os.stat(os.path.join(args.work_dir, output_path)).st_size // 1024 // 1024))
+        print("Size of training set:\t{.2f} MB".format(os.path.getsize(train_set) / 1e6))
+        print("Size of validation set:\t{.2f} MB".format(os.path.getsize(val_set) / 1e6))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):

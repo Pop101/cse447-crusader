@@ -39,7 +39,7 @@ class FileDataloader:
                     text = self._encoding_ambivalent_load(file_path)
                     for filter in self.filters:
                         text = filter(text)
-                    yield {"text": text, "filename": file}
+                    yield {"text": text, "filename": file_path}
 
 class FixedLengthDataloader(FileDataloader):
     """

@@ -38,57 +38,11 @@ if __name__ == '__main__':
     #print("Running in {}".format(device))
 
     if args.mode == 'prepare':
-        if not os.path.isdir(args.work_dir):
-            print('Making working directory {}'.format(args.work_dir))
-            os.makedirs(args.work_dir)
-            
-        print('Performing Test/Train Split')
-        splitter  = SymlinkTestTrainSplit(DATA_DIR, {
-            TRAIN_DIR: 0.75,
-            VAL_DIR: 0.25
-        })
-        splitter.split(random_state=42)
-        
-        train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
-        val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
-
-        train_set = limerator(train_set, 1000_000)
-        val_set   = limerator(val_set, 1000_000)
-        
-        # TODO: stream iterator to disk
-        output_path = os.path.join(args.work_dir, 'train.parquet')
-        first_chunk = True
-        for chunk in tqdm(chunker(train_set, 10_000)):
-            df = pd.DataFrame({'text': chunk})
-            if first_chunk:
-                df.to_parquet(output_path, compression='snappy')
-                first_chunk = False
-            else:
-                df.to_parquet(output_path, compression='snappy', append=True)
-        
-        print(pd.read_pickle(os.path.join(args.work_dir, output_path)))
-        
-        print("Data saved to {}".format(args.work_dir))
-        print("Size of training set:\t{}mb".format(os.stat(os.path.join(args.work_dir, output_path)).st_size // 1024 // 1024))
+        raise NotImplementedError('Prepare mode not supported with docker')
         
     elif args.mode == 'train':
-        if not os.path.isdir(args.work_dir):
-            print('Making working directory {}'.format(args.work_dir))
-            os.makedirs(args.work_dir)
-        
-        print('Instatiating model')
-        model = TransformerPredictor()
-        
-        print('Loading Data')
-        train_set = pd.read_pickle(os.path.join(args.work_dir, 'train.tar.gz'))['text']
-        val_set   = pd.read_pickle(os.path.join(args.work_dir, 'val.tar.gz'))['text']
+        raise NotImplementedError('Train mode not supported with docker')
 
-        print('Training')
-        model.run_train(train_set, args.work_dir)
-        
-        print('Saving model')
-        model.save(args.work_dir)
-        
     elif args.mode == 'test':
         print('Loading model')
         model = TransformerPredictor.load(args.work_dir)

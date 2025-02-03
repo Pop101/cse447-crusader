@@ -54,3 +54,35 @@ def stream_to_csv(iterator, output_path):
             first_chunk = False
         else:
             df.to_csv(output_path, mode='a', header=False, index=False)
+
+def stream_load_parquet(
+    filepath: str,
+    columns = None,
+    batch_size: int = 10000
+):
+    """
+    Stream a Parquet file in batches using PyArrow.
+    
+    Args:
+        filepath: Path to the Parquet file
+        columns: List of columns to read (None for all columns)
+        batch_size: Number of rows to read in each batch
+        
+    Yields:
+        pandas.DataFrame: Batch of rows as a pandas DataFrame
+    """
+    # Open the ParquetFile
+    parquet_file = pq.ParquetFile(filepath)
+    
+    # Get total number of row groups
+    num_row_groups = parquet_file.num_row_groups
+    
+    # Stream row groups
+    for row_group_idx in range(num_row_groups):
+        row_group = parquet_file.read_row_group(row_group_idx, columns=columns)
+        df = row_group.to_pandas()
+        
+        # Yield batches from this row group
+        for batch_start in range(0, len(df), batch_size):
+            batch_end = min(batch_start + batch_size, len(df))
+            yield df.iloc[batch_start:batch_end]

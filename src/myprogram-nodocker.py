@@ -8,15 +8,15 @@ from tqdm.auto import tqdm
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
-from modules.torchmodels import CharTensorDataset, NgramCharTensorSet
+from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
-from modules.datawriter import chunker, stream_to_single_parquet
+from modules.datawriter import chunker, stream_to_single_parquet, stream_load_parquet
 
 from modules.torchgpu import device
 import torch
 import pandas as pd
-from itertools import islice
-
+from itertools import islice, chain
+import pickle
 
 combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
 
@@ -61,29 +61,63 @@ if __name__ == '__main__':
         train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, 1_000))
         val_set   = map(lambda x: pd.DataFrame(x), chunker(val_set, 1_000))
         
+        # Learn vocab DURING iterator consume
+        vocab = {'<PAD>': 0, '<UNK>': 1}
+        def learn_vocab(df):
+            char_set = set(chain.from_iterable(df['text'].values))
+            for char in char_set:
+                if char not in vocab:
+                    vocab[char] = len(vocab)
+        
+        train_set = map(lambda df: learn_vocab(df) or df, train_set)
+        val_set   = map(lambda df: learn_vocab(df) or df, val_set)
+        
         # Stream iterator to disk
         train_file = os.path.join(args.work_dir, 'train.parquet')
         val_file   = os.path.join(args.work_dir, 'val.parquet')
         stream_to_single_parquet(train_set, train_file)
         stream_to_single_parquet(val_set, val_file)
         
-        print("Size of training set:\t{.2f} MB".format(os.path.getsize(train_set) / 1e6))
-        print("Size of validation set:\t{.2f} MB".format(os.path.getsize(val_set) / 1e6))
+        # Save vocab to disk
+        with open(os.path.join(args.work_dir, 'vocab.pkl'), 'wb') as f:
+            pickle.dump(vocab, f)
+            
+        print("Size of training set:\t{.2f} MB".format(os.path.getsize(train_file) / 1e6))
+        print("Size of validation set:\t{.2f} MB".format(os.path.getsize(val_file) / 1e6))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):
-            print('Making working directory {}'.format(args.work_dir))
-            os.makedirs(args.work_dir)
+            print("Working directory {} does not exist".format(args.work_dir))
+            exit(1)
         
-        print('Instatiating model')
-        model = TransformerPredictor()
+        print('Loading vocab')
+        with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
+            vocab = pickle.load(f)
+            
+        print('Instantiating model')
+        model = TransformerPredictor(len(vocab), 100, 512, 8, 6)
         
-        print('Loading Data')
-        train_set = pd.read_pickle(os.path.join(args.work_dir, 'train.tar.gz'))['text']
-        val_set   = pd.read_pickle(os.path.join(args.work_dir, 'val.tar.gz'))['text']
-
-        print('Training')
-        model.run_train(train_set, args.work_dir)
+        for i_ in range(10):
+            print(f"Epoch {i_}", end=' ')
+        
+            train_set = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet'))
+            val_set   = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet'))
+            
+            train_set_texts = chain.from_iterable(df['text'].values for df in train_set)
+            val_set_texts   = chain.from_iterable(df['text'].values for df in val_set)
+            
+            train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>']))
+            val_set_tensors   = stream_to_tensors(val_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>']))
+            
+            train_pairs = create_sequence_pairs(train_set_tensors, 100)
+            
+            # Limit to 10 batches
+            train_pairs = limerator(train_pairs, 10)
+            loss = model.train_epoch(train_pairs)
+            print(f"Loss: {loss}")
+            
+            # Try to outrun oom (it wont work)
+            del train_pairs, train_set_tensors, val_set_tensors, train_set_texts, val_set_texts, train_set, val_set
         
         print('Saving model')
         model.save(args.work_dir)

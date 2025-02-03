@@ -1,49 +1,37 @@
 from modules.abstract_predictor import AbstractPredictor
 from modules.torchmodels import TransformerModel, CharTensorDataset, NgramCharTensorSet
 import torch
+from torch import nn
 import os
 import pickle
 from tqdm.auto import tqdm
 from modules.torchgpu import device
 import random
 import string
-class TransformerPredictor(AbstractPredictor):
-    def __init__(self) -> None:
-        super().__init__()
-        self.model = None
-        
-    def run_train(self, data, work_dir):
-        self.dataset = CharTensorDataset(data)
-        self.model = TransformerModel(
-            vocab_size=len(self.dataset.char_to_idx),
-            tensor_length=self.dataset.seq_length,
-            embed_size=512,
-            num_heads=8,
-            num_layers=6
-        )
-        
-        train_set_loader = torch.utils.data.DataLoader(self.dataset, batch_size=32, shuffle=True)
-        train_set = list(map(lambda x: (x[0].to(device), x[1].to(device)), train_set_loader)) # send to GPU
-        
-        # Train the model
-        num_epochs = 1
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=1e-5)
-        criterion = torch.nn.CrossEntropyLoss()
-        for epoch in range(num_epochs):
-            self.model.train()
-            for batch in tqdm(train_set, desc=f"Epoch {epoch+1}/{num_epochs}"):
-                input, target = batch
-                optimizer.zero_grad()
-                input = input.unsqueeze(0)
-                
-                # Forward
-                output = self.model(input)
-                loss = criterion(output.view(-1, output.size(-1)), target.view(-1))
-                
-                # Backward
-                loss.backward()
-                optimizer.step()
+from typing import Iterator, Tuple
 
+class TransformerPredictor(AbstractPredictor):
+    def __init__(self, vocab_size, tensor_length, embed_size, num_heads, num_layers) -> None:
+        super().__init__()
+        self.model = TransformerModel(vocab_size, tensor_length, embed_size, num_heads, num_layers).to(device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=0.0001)
+        self.criterion = nn.CrossEntropyLoss()
+        
+    def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
+        self.model.train()
+        total_loss = 0
+        for X, y in pair_iterator:
+            X = X.reshape(-1, X.size(-1))  # Combine sequence and batch dimensions
+            y = y.reshape(-1)              # Flatten targets
+            
+            self.optimizer.zero_grad()
+            output = self.model(X)
+            loss = self.criterion(output, y)
+            loss.backward()
+            self.optimizer.step()
+            total_loss += loss.item()
+        return total_loss
+    
     def run_pred(self, data):
         self.model.eval()
         with torch.no_grad():

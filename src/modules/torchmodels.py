@@ -1,7 +1,10 @@
+from typing import Iterator, Tuple
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
+from modules.datawriter import chunker
+import numpy as np
 
 class CharTensorDataset(Dataset):
     """
@@ -41,7 +44,7 @@ class CharTensorDataset(Dataset):
     def __getitem__(self, idx):
         string = self.strings[idx]
         return self.string_to_tensor(string[:-1]), self.char_to_idx[string[-1]]
-    
+
 class NgramCharTensorSet(Dataset):
     """
     A dataset that loads a list of ngrams (tuple of words),
@@ -113,6 +116,40 @@ class NgramCharTensorSet(Dataset):
         return self.ngram_to_tensor(ngram[:-1]), self.ngram_to_tensor(ngram[-1])
     
 
+def stream_to_tensors(iterator, tensor_length:int, batch_size=1, vocab=ord) -> Iterator[torch.Tensor]:
+    """
+    Iterate over a stream of strings (or possibly ngrams), applying the "vocab" transformation
+    to convert each string to a tensor.
+    
+    By default, the "vocab" is ord, the unicode value of the character.
+    
+    All tensors returned will be of tensor_length, padded with zeros.
+    The iterator will be batched into batch_size.
+
+    Args:
+        iterator: iterator to be transformed
+        tensor_length (int): length of the tensor. If space is not enough, the string will be truncated.
+        batch_size (int, optional): Batch Size for the output. Defaults to 1.
+        vocab (function->int, optional): Conversion function for the string. Defaults to ord.
+
+    Returns:
+        Iterator[torch.Tensor]: Stream of tensors
+    """
+    
+    for chunk in chunker(iterator, batch_size):
+        # Convert to tensors
+        tensors = []
+        for item in chunk:
+            tensor = torch.zeros(tensor_length, dtype=torch.long)
+            for i, char in enumerate(item):
+                if i >= tensor_length:
+                    break
+                tensor[i] = vocab(char)
+            tensors.append(tensor)
+        
+        # Stack tensors
+        yield torch.stack(tensors)
+
 class TransformerModel(nn.Module):
     def __init__(self, vocab_size, tensor_length, embed_size, num_heads, num_layers):
         super().__init__()
@@ -156,6 +193,55 @@ class TransformerModel(nn.Module):
         
         # Get the last sequence element for classification
         return self.fc(x[-1])
+
+def create_sequence_pairs(
+    batched_tensors: Iterator[torch.Tensor],
+    max_sequence_length: int,
+) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+    """
+    Creates batched training pairs from pre-batched tensors for character-level language modeling.
+    
+    Args:
+        batched_tensors: Iterator of batched PyTorch tensors, each of shape (batch_size, sequence_length)
+        max_sequence_length: Maximum length of output sequences
+        device: Target device for tensors
+        
+    Yields:
+        Tuple of (X, y) where:
+            X: tensor of shape (sequence_length-1, batch_size, max_sequence_length) containing input sequences
+            y: tensor of shape (sequence_length-1, batch_size) containing next characters to predict
+    """
+    for batch in batched_tensors:
+        sequence_length = batch.size(1)
+        batch_size = batch.size(0)
+        
+        # Preallocate tensors for all sequences in this batch
+        all_X = []
+        all_y = []
+        
+        # Generate all sequences for current batch
+        for end_idx in range(1, sequence_length):
+            # Input sequences up to current position
+            X = batch[:, :end_idx].clone()
+            
+            # Target is next character for each sequence in batch
+            y = batch[:, end_idx].clone()
+            
+            # Pad if needed
+            if X.size(1) < max_sequence_length:
+                pad_size = max_sequence_length - X.size(1)
+                X = torch.nn.functional.pad(X, (0, pad_size), value=0)
+            elif X.size(1) > max_sequence_length:
+                X = X[:, :max_sequence_length]
+            
+            all_X.append(X)
+            all_y.append(y)
+        
+        # Stack all sequences for this batch
+        X_batch = torch.stack(all_X)  # shape: (sequence_length-1, batch_size, max_sequence_length)
+        y_batch = torch.stack(all_y)  # shape: (sequence_length-1, batch_size)
+        
+        yield X_batch, y_batch
 
 if __name__ == "__main__":
     ngrams = [

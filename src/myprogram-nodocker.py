@@ -20,7 +20,10 @@ import pickle
 
 combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
 
-DATA_DIR  = '/mnt/e/data/gutenberg'
+# Data is located here:
+# Leon's machine: '/mnt/e/data/gutenberg'
+# Hyak: '/gscratch/gutenberg'
+
 TRAIN_DIR = './data-train'
 VAL_DIR   = './data-val'
 
@@ -29,6 +32,7 @@ limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('mode', choices=('prepare', 'train', 'test'), help='what to run')
+    parser.add_argument('--data_dir', help='where to save', default='/gscratch/gutenberg')
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
@@ -44,7 +48,7 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
             
         print('Performing Test/Train Split')
-        splitter  = SymlinkTestTrainSplit(DATA_DIR, {
+        splitter  = SymlinkTestTrainSplit(args.data_dir, {
             TRAIN_DIR: 0.75,
             VAL_DIR: 0.25
         })

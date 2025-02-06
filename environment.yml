@@ -1,0 +1,22 @@
+name: cse447
+channels:
+  - conda-forge
+dependencies:
+  - ipykernel
+  - jupyter
+  - matplotlib
+  - nltk
+  - numpy
+  - pandas
+  - python=3.12
+  - pytorch
+  - pytorch-cuda=12.4
+  - seaborn
+  - torchaudio
+  - torchvision
+  - tqdm
+  - datasets
+  - async-timeout
+  - chardet
+  - regex
+  - pyarrow

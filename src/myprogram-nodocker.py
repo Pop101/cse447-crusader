@@ -11,7 +11,7 @@ from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, Tokenizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
 from modules.datawriter import chunker, stream_to_single_parquet, stream_load_parquet
-
+from modules.pprint import TimerContext
 from modules.torchgpu import device
 import torch
 import pandas as pd
@@ -90,13 +90,15 @@ if __name__ == '__main__':
             print("Working directory {} does not exist".format(args.work_dir))
             exit(1)
         
-        print('Loading vocab')
-        with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
-            vocab = pickle.load(f)
-            
+        with TimerContext('Loading vocab'):
+            with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
+                vocab = pickle.load(f)
+            print(f"\tVocab contains {len(vocab)} characters")
+
         print('Instantiating model')
         model = TransformerPredictor(len(vocab), 100, 512, 8, 6)
         
+        print('\nTraining model')
         for i_ in range(10):
             print(f"Epoch {i_}", end=' ')
         

@@ -82,8 +82,8 @@ if __name__ == '__main__':
         with open(os.path.join(args.work_dir, 'vocab.pkl'), 'wb') as f:
             pickle.dump(vocab, f)
             
-        print("Size of training set:\t{.2f} MB".format(os.path.getsize(train_file) / 1e6))
-        print("Size of validation set:\t{.2f} MB".format(os.path.getsize(val_file) / 1e6))
+        print("Size of training set:\t{:.2f} MB".format(os.path.getsize(train_file) / 1e6))
+        print("Size of validation set:\t{:.2f} MB".format(os.path.getsize(val_file) / 1e6))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):
@@ -100,26 +100,20 @@ if __name__ == '__main__':
         
         print('\nTraining model')
         for i_ in range(10):
-            print(f"Epoch {i_}", end=' ')
-        
-            train_set = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet'))
-            val_set   = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet'))
-            
-            train_set_texts = chain.from_iterable(df['text'].values for df in train_set)
-            val_set_texts   = chain.from_iterable(df['text'].values for df in val_set)
-            
-            train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>']))
-            val_set_tensors   = stream_to_tensors(val_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>']))
-            
-            train_pairs = create_sequence_pairs(train_set_tensors, 100)
-            
-            # Limit to 10 batches
-            train_pairs = limerator(train_pairs, 10)
-            loss = model.train_epoch(train_pairs)
-            print(f"Loss: {loss}")
-            
-            # Try to outrun oom (it wont work)
-            del train_pairs, train_set_tensors, val_set_tensors, train_set_texts, val_set_texts, train_set, val_set
+            with TimerContext(f'Epoch {i_}'):
+                # Build the iterator (pull-based streaming)
+                train_set         = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet')) # Read from disk (too big for ram)
+                train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
+                train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>'])) # Convert to tensors w vocab
+                train_pairs       = create_sequence_pairs(train_set_tensors, 100) # Create variable length sequences
+                
+                # Limit to 10 batches
+                train_pairs = limerator(train_pairs, 10)
+                loss = model.train_epoch(train_pairs)
+                print(f"Loss: {loss}")
+                
+                # Try to outrun oom (it wont work)
+                del train_pairs, train_set_tensors, train_set_texts, train_set
         
         print('Saving model')
         model.save(args.work_dir)

@@ -10,7 +10,8 @@ from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTe
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
-from modules.datawriter import chunker, stream_to_single_parquet, stream_load_parquet
+from modules.datawriter import stream_to_single_parquet, stream_load_parquet
+from modules.streamutil import chunker, sample_stream
 from modules.pprint import TimerContext
 from modules.torchgpu import device
 import torch
@@ -110,9 +111,8 @@ if __name__ == '__main__':
                 train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
                 train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>'])) # Convert to tensors w vocab
                 train_pairs       = create_sequence_pairs(train_set_tensors, 100) # Create variable length sequences
+                train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the data
                 
-                # Limit to 10 batches
-                train_pairs = limerator(train_pairs, 10)
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")
                 

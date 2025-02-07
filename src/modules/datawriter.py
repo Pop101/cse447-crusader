@@ -5,16 +5,6 @@ import pyarrow.parquet as pq
 from pathlib import Path
 from tqdm import tqdm
 
-
-def chunker(it, chunk_size):
-    chunk = []
-    for item in it:
-        chunk.append(item)
-        if len(chunk) == chunk_size:
-            yield chunk
-            chunk = []
-    if chunk:
-        yield chunk
         
 def stream_to_single_parquet(iterator, output_path):
     """

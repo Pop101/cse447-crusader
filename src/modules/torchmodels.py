@@ -196,10 +196,39 @@ class TransformerModel(nn.Module):
 
 def create_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],
+    sequence_length: int,
+):
+    """
+    Creates batched training pairs from pre-batched tensors for character-level
+
+    Args:
+        batched_tensors (Iterator[torch.Tensor]): Iterator of batched PyTorch tensors, each of shape (batch_size, sequence_length)
+        sequence_length (int): Length of sequences to generate
+    
+    Yields:
+        Tuple of (X, y) where:
+            X: tensor of shape (sequence_length-1, batch_size) containing input sequences
+            y: tensor of shape (1, batch_size) containing next character to predict
+    """
+    
+    for batch in batched_tensors:
+        for i in range(batch.size(1) - sequence_length):
+            # Input sequence: sequence_length-1 characters
+            X = batch[:, i:i+sequence_length-1]
+            
+            # Target: next character after the sequence
+            y = batch[:, i+sequence_length-1:i+sequence_length]
+            
+            yield (X, y)
+        
+    
+def create_variable_length_sequence_pairs(
+    batched_tensors: Iterator[torch.Tensor],
     max_sequence_length: int,
 ) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
     """
     Creates batched training pairs from pre-batched tensors for character-level language modeling.
+    Sequences are variable length, with padding added for all variations from 0..max_sequence_length
     
     Args:
         batched_tensors: Iterator of batched PyTorch tensors, each of shape (batch_size, sequence_length)
@@ -208,8 +237,8 @@ def create_sequence_pairs(
         
     Yields:
         Tuple of (X, y) where:
-            X: tensor of shape (sequence_length-1, batch_size, max_sequence_length) containing input sequences
-            y: tensor of shape (sequence_length-1, batch_size) containing next characters to predict
+            X: tensor of shape (sequence_length-1, batch_size) containing input sequences
+            y: tensor of shape (1, batch_size) containing next character to predict
     """
     for batch in batched_tensors:
         sequence_length = batch.size(1)

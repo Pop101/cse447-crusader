@@ -1,4 +1,4 @@
-name: cse447-v2
+name: cse447
 channels:
   - conda-forge
 dependencies:

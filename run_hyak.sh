@@ -21,7 +21,7 @@ Setting Conda Env:
 "
 
 # Check if the conda environment exists
-if ! conda info --envs | awk '{print $1}' | grep -qx "cse447"; then
+if ! conda info --envs | awk '{print $1}' | grep -qx "cse447-v2"; then
     echo "Conda environment 'cse447' not found. Creating it..."
     conda env create -f environment.yml -y
 else
@@ -29,7 +29,7 @@ else
 fi
 
 # Activate environment
-conda activate cse447
+conda activate cse447-v2
 
 echo "
 Env setup complete!

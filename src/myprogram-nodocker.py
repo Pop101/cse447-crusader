@@ -52,7 +52,7 @@ if __name__ == '__main__':
         splitter  = SymlinkTestTrainSplit(args.data_dir, {
             TRAIN_DIR: 0.75,
             VAL_DIR: 0.25
-        })
+        }, verbose=True)
         splitter.split(random_state=42)
         
         train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])

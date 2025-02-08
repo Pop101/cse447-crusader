@@ -129,7 +129,7 @@ class SymlinkTestTrainSplit:
         
         self.index = sorted(self.index)
     
-    def split(self, random_state=None, shuffle=True):
+    def split(self, random_state=None, shuffle=True, verbose=False):
         if random_state is not None:
             random.seed(random_state)
         
@@ -150,6 +150,11 @@ class SymlinkTestTrainSplit:
             file_assignments[split_name] = idx[:count]
             idx = idx[count:]
         file_assignments[last_key] += idx
+        
+        if verbose:
+            print("Splitting files into:")
+            for split_name, files in file_assignments.items():
+                print(f"{split_name}: {len(files)} files")
                 
         # Create symlinks in respective directories
         for split_name, files in file_assignments.items():
@@ -163,6 +168,9 @@ class SymlinkTestTrainSplit:
                 with open(index_file, 'r') as f:
                     existing_files = [line.strip() for line in f if line.strip()]
                 files = [f for f in files if f not in existing_files]
+                
+                if verbose:
+                    print(f"Found {len(existing_files)} existing files in {split_name}. {len(files)} new files to symlink.")
             
             # Symlink all files
             for file_path in tqdm(files, desc=f"Creating symlinks for {split_name}"):
@@ -178,3 +186,6 @@ class SymlinkTestTrainSplit:
             with open(os.path.join(split_dir, "index.txt"), 'w') as f:
                 for file in chain(files, existing_files):
                     f.write(file + '\n')
+            
+            if verbose:
+                print(f"Finished creating symlinks for {split_name}")

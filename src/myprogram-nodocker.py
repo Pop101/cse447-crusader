@@ -55,12 +55,11 @@ if __name__ == '__main__':
         })
         splitter.split(random_state=42, verbose=True)
         
+        
+        print('Learning Vocab & Writing to .parquet')
+        
         train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
         val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
-
-        # Limit to first 1m
-        # train_set = limerator(train_set, 10_000)
-        # val_set   = limerator(val_set, 10_000)
         
         # Transform to chunks, then to pandas
         train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, 1_000))
@@ -78,7 +77,7 @@ if __name__ == '__main__':
         train_set = map(lambda df: learn_vocab(df) or df, train_set)
         val_set   = map(lambda df: learn_vocab(df) or df, val_set)
         
-        # Stream iterator to disk
+        # Stream iterator to disk        
         #train_file = os.path.join(args.work_dir, 'train.parquet')
         val_file   = os.path.join(args.work_dir, 'val.parquet')
         #stream_to_single_parquet(train_set, train_file)

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
-from modules.datawriter import chunker
+from modules.streamutil import chunker
 import numpy as np
 
 class CharTensorDataset(Dataset):

@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
-from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer
+from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
 from modules.datawriter import stream_to_single_parquet, stream_load_parquet
@@ -19,7 +19,7 @@ import pandas as pd
 from itertools import islice, chain
 import pickle
 
-combined_normalizer = GutenbergNormalizer() + StemmerNormalizer() + TokenizerNormalizer()
+combined_normalizer = GutenbergNormalizer() + StringNormalizer(remove_punct=False, lowercase=False)
 
 # Data is located here:
 # Leon's machine: '/mnt/e/data/gutenberg'

@@ -20,13 +20,13 @@ echo "
 Setting Conda Env:
 "
 
-# Check if the conda environment exists
-if ! conda info --envs | awk '{print $1}' | grep -qx "cse447-v2"; then
-    echo "Conda environment 'cse447' not found. Creating it..."
-    conda env create -f environment.yml -y
+if ! conda env list | grep -q "cse447-v2\s*$"; then
+	echo "Conda environment 'cse447-v2' not found. Creating it..."
+	conda env create -f environment.yml -y
 else
-    echo "Conda environment 'cse447' already exists. Skipping creation."
+	echo "Conda environment 'cse447-v2' already exists. Skipping creation."
 fi
+
 
 # Activate environment
 conda activate cse447-v2

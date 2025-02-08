@@ -4,9 +4,9 @@
 #SBATCH --account=bdata
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
+#SBATCH --mem=256G
 #SBATCH --gres=gpu:1
-#SBATCH --time=100:00:00
+#SBATCH --time=999:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=lleibm@uw.edu
 # I use source to initialize conda into the right environment.

@@ -37,7 +37,7 @@ Env setup complete!
 Checking for GPU...
 "
 
-python -c "import torch; print('CUDA is available.' if torch.cuda.is_available() else 'CUDA is not available.')"
+python3 -c "import torch; print('CUDA is available.' if torch.cuda.is_available() else 'CUDA is not available.')"
 
 echo "
 --------------------
@@ -46,7 +46,7 @@ Preparing Data...
 
 if [[ ! -f ./work/train.parquet ]]; then
     echo "train.parquet not found. Running data preparation..."
-    python src/myprogram-nodocker.py prepare --work_dir work --data_dir /gscratch/scrubbed/gutenberg
+    python3 src/myprogram-nodocker.py prepare --work_dir work --data_dir /gscratch/scrubbed/gutenberg
     echo "Done preparing!"
 else
     echo "train.parquet already exists. Skipping data preparation."
@@ -57,4 +57,4 @@ echo "
 Training...
 "
 
-python src/myprogram-nodocker.py train --work_dir work --data_dir /gscratch/scrubbed/gutenberg
+python3 src/myprogram-nodocker.py train --work_dir work --data_dir /gscratch/scrubbed/gutenberg

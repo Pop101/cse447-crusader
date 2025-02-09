@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=cse447-model-train
-#SBATCH --partition=ckpt-all
+#SBATCH --partition=ckpt-g2
 #SBATCH --account=bdata
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8

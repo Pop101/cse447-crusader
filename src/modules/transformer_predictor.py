@@ -21,9 +21,6 @@ class TransformerPredictor(AbstractPredictor):
         self.model.train()
         total_loss = 0
         for X, y in pair_iterator:
-            X = X.reshape(-1, X.size(-1)).to(device)  # Combine sequence and batch dimensions
-            y = y.reshape(-1).to(device)              # Flatten targets
-            
             self.optimizer.zero_grad()
             output = self.model(X)
             loss = self.criterion(output, y)

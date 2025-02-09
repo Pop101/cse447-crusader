@@ -32,7 +32,7 @@ limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('mode', choices=('prepare', 'train', 'test'), help='what to run')
+    parser.add_argument('mode', choices=('prepare', 'process', 'train', 'test'), help='what to run')
     parser.add_argument('--data_dir', help='where to save', default='/gscratch/gutenberg')
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
@@ -89,6 +89,33 @@ if __name__ == '__main__':
             
         print("Size of training set:\t{:.2f} MB".format(os.path.getsize(train_file) / 1e6))
         print("Size of validation set:\t{:.2f} MB".format(os.path.getsize(val_file) / 1e6))
+    elif args.mode == 'process':
+        # Process step converts training and validation data to tensors
+        if not os.path.isdir(args.work_dir):
+            print("Working directory {} does not exist".format(args.work_dir))
+            exit(1)
+        
+        with TimerContext('Loading vocab'):
+            with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
+                vocab = pickle.load(f)
+            total_count = sum(freq for char, (idx, freq) in vocab.items())
+            print(f"\tVocab contains {len(vocab)} unique characters ({total_count} total)")
+            
+        train_set         = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet')) # Read from disk (too big for ram)
+        train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
+        train_set_tensors = stream_to_tensors(train_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+        train_set_tensors = map(lambda x: pd.DataFrame(x), chunker(train_set_tensors, 10_000))
+        
+        with TimerContext('Writing training tensors to disk'):
+            stream_to_single_parquet(train_set_tensors, os.path.join(args.work_dir, 'train_tensors.parquet'))
+        
+        val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
+        val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten
+        val_set_tensors = stream_to_tensors(val_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+        val_set_tensors = map(lambda x: pd.DataFrame(x), chunker(val_set_tensors, 10_000))
+        
+        with TimerContext('Writing validation tensors to disk'):
+            stream_to_single_parquet(val_set_tensors, os.path.join(args.work_dir, 'val_tensors.parquet'))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):

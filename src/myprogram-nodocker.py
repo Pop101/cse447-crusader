@@ -109,7 +109,7 @@ if __name__ == '__main__':
                 # Build the iterator (pull-based streaming)
                 train_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
                 train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
-                train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+                train_set_tensors = stream_to_tensors(train_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
                 train_pairs       = create_random_length_sequence_pairs(train_set_tensors, 0, 100) # Create variable length sequences
                 train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the data
                 

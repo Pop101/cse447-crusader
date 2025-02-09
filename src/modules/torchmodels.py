@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 from modules.streamutil import chunker
+from modules.torchgpu import device
 import numpy as np
 
 class CharTensorDataset(Dataset):
@@ -116,7 +117,7 @@ class NgramCharTensorSet(Dataset):
         return self.ngram_to_tensor(ngram[:-1]), self.ngram_to_tensor(ngram[-1])
     
 
-def stream_to_tensors(iterator, tensor_length:int, batch_size=1, vocab=ord) -> Iterator[torch.Tensor]:
+def stream_to_tensors(iterator, tensor_length:int, batch_size=1, vocab=ord, device=device) -> Iterator[torch.Tensor]:
     """
     Iterate over a stream of strings (or possibly ngrams), applying the "vocab" transformation
     to convert each string to a tensor.
@@ -145,54 +146,61 @@ def stream_to_tensors(iterator, tensor_length:int, batch_size=1, vocab=ord) -> I
                 if i >= tensor_length:
                     break
                 tensor[i] = vocab(char)
-            tensors.append(tensor)
+            tensors.append(tensor.to(device))
         
         # Stack tensors
         yield torch.stack(tensors)
 
 class TransformerModel(nn.Module):
-    def __init__(self, vocab_size, tensor_length, embed_size, num_heads, num_layers):
+    def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers, dropout=0.1):
         super().__init__()
+        self.max_seq_length = max_seq_length
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.pos_embedding = nn.Embedding(tensor_length, embed_size)
-        self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(embed_size, num_heads), num_layers
+        self.pos_embedding = nn.Embedding(max_seq_length, embed_size)
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_size,
+            nhead=num_heads,
+            dropout=dropout,
+            batch_first=True
         )
+        
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            enable_nested_tensor=True
+        )
+        
         self.fc = nn.Linear(embed_size, vocab_size)
-        
+        self.dropout = nn.Dropout(dropout)
+    
     def forward(self, x):
-        # Remove extra dimension if present
-        if len(x.shape) > 2:
-            x = x.squeeze()
+        """
+        Forward pass handling variable length sequences.
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len)
+        """
+        batch_size, seq_len = x.shape
         
-        batch_size = x.size(0)
-        seq_len = x.size(1)
-        
-        # Create positions tensor
+        # Create position indices for the actual sequence length
         positions = torch.arange(0, seq_len, device=x.device)
         positions = positions.unsqueeze(0).expand(batch_size, -1)
         
-        # Word embeddings: (batch_size, seq_len, embed_size)
+        # Get embeddings
         word_embeddings = self.embedding(x)
-        
-        # Position embeddings: (batch_size, seq_len, embed_size)
         pos_embeddings = self.pos_embedding(positions)
         
-        # Combine embeddings
-        x = word_embeddings + pos_embeddings
+        # Combine embeddings & Dropout
+        x = self.dropout(word_embeddings + pos_embeddings)
         
-        # Generate padding mask - check original input for padding tokens
-        # Mask should be (batch_size, seq_len) where True indicates positions to be masked
+        # Create padding mask
         padding_mask = (x == 0).any(dim=-1)
         
-        # Permute for transformer: (seq_len, batch_size, embed_size)
-        x = x.permute(1, 0, 2)
-        
-        # Transform with attention mask
+        # Pass through transformer
         x = self.transformer(x, src_key_padding_mask=padding_mask)
         
-        # Get the last sequence element for classification
-        return self.fc(x[-1])
+        # Get final token representation
+        return self.fc(x[:, -1, :])
 
 def create_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],
@@ -221,7 +229,48 @@ def create_sequence_pairs(
             
             yield (X, y)
         
+def create_random_length_sequence_pairs(
+    batched_tensors: Iterator[torch.Tensor],
+    min_sequence_length: int,
+    max_sequence_length: int,
+):
+    """
+    Creates batched training pairs from pre-batched tensors for character-level.
+    Sequences are of max_sequence_length, but masked to random lengths between min_sequence_length and max_sequence_length
+
+    Args:
+        batched_tensors (Iterator[torch.Tensor]): Iterator of batched PyTorch tensors, each of shape (batch_size, sequence_length)
+        sequence_length (int): Length of sequences to generate
     
+    Yields:
+        Tuple of (X, y) where:
+            X: tensor of shape (sequence_length-1, batch_size) containing input sequences
+            y: tensor of shape (1, batch_size) containing next character to predict
+    """
+    for batch in batched_tensors:
+        batch_size = batch.size(0)
+        
+        effective_lengths = torch.randint(
+            min_sequence_length,
+            max_sequence_length,
+            (batch_size,),
+            device=batch.device
+        )
+        
+        # Create position indices tensor
+        positions = torch.arange(max_sequence_length-1, device=batch.device).expand(batch_size, -1)
+        
+        # Create mask where positions are less than effective_lengths
+        mask = positions < effective_lengths.unsqueeze(1)
+        
+        # Get X and apply mask
+        X = batch[:, :-1] * mask
+        
+        # Get y values at effective_lengths positions
+        y = torch.gather(batch, 1, effective_lengths.unsqueeze(1)).squeeze(1)
+        
+        yield (X, y)
+
 def create_variable_length_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],
     max_sequence_length: int,

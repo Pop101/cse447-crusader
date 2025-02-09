@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
-from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs
+from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs, create_random_length_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
 from modules.datawriter import stream_to_single_parquet, stream_load_parquet
 from modules.streamutil import chunker, sample_stream
@@ -78,16 +78,16 @@ if __name__ == '__main__':
         val_set   = map(lambda df: learn_vocab(df) or df, val_set)
         
         # Stream iterator to disk        
-        #train_file = os.path.join(args.work_dir, 'train.parquet')
+        train_file = os.path.join(args.work_dir, 'train.parquet')
         val_file   = os.path.join(args.work_dir, 'val.parquet')
-        #stream_to_single_parquet(train_set, train_file)
+        stream_to_single_parquet(train_set, train_file)
         stream_to_single_parquet(val_set, val_file)
         
         # Save vocab to disk
         with open(os.path.join(args.work_dir, 'vocab.pkl'), 'wb') as f:
             pickle.dump(vocab, f)
             
-        #print("Size of training set:\t{:.2f} MB".format(os.path.getsize(train_file) / 1e6))
+        print("Size of training set:\t{:.2f} MB".format(os.path.getsize(train_file) / 1e6))
         print("Size of validation set:\t{:.2f} MB".format(os.path.getsize(val_file) / 1e6))
         
     elif args.mode == 'train':
@@ -110,7 +110,7 @@ if __name__ == '__main__':
                 train_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
                 train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
                 train_set_tensors = stream_to_tensors(train_set_texts, 100, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
-                train_pairs       = create_sequence_pairs(train_set_tensors, 100) # Create variable length sequences
+                train_pairs       = create_random_length_sequence_pairs(train_set_tensors, 0, 100) # Create variable length sequences
                 train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the data
                 
                 loss = model.train_epoch(train_pairs)
@@ -119,8 +119,8 @@ if __name__ == '__main__':
                 # Try to outrun oom (it wont work)
                 del train_pairs, train_set_tensors, train_set_texts, train_set
         
-        print('Saving model')
-        model.save(args.work_dir)
+            print('Saving model')
+            model.save(args.work_dir)
         
     elif args.mode == 'test':
         print('Loading model')

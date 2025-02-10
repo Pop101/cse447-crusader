@@ -38,11 +38,11 @@ class TransformerPredictor(AbstractPredictor):
         self.num_layers = num_layers
         
         self.best_loss = float('inf')
-        self.epochs_without_improvement = 0
+        self.total_batches = 0
         
     def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
         self.model.train()
-        total_loss, total_batches = 0, 0
+        epoch_loss, epoch_batches = 0, 0
         for X, y in pair_iterator:
             self.optimizer.zero_grad()
             output = self.model(X)
@@ -50,12 +50,13 @@ class TransformerPredictor(AbstractPredictor):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
-            total_loss += loss.item()
-            total_batches += 1
+            epoch_loss += loss.item()
+            epoch_batches += 1
         
         self.scheduler.step()
-        self.best_loss = min(self.best_loss, total_loss / total_batches)
-        return total_loss / total_batches
+        self.best_loss = min(self.best_loss, epoch_loss / epoch_batches if epoch_batches > 0 else float('inf'))
+        self.total_batches += epoch_batches
+        return epoch_loss / epoch_batches
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         self.model.eval()
@@ -94,7 +95,8 @@ class TransformerPredictor(AbstractPredictor):
             'embed_size': self.embed_size,
             'num_heads': self.num_heads,
             'num_layers': self.num_layers,
-            'best_loss': self.best_loss
+            'best_loss': self.best_loss,
+            'total_batches': self.total_batches
         }
         torch.save(state, os.path.join(work_dir, 'TransformerPredictor.pt'))
             
@@ -113,5 +115,6 @@ class TransformerPredictor(AbstractPredictor):
         predictor.model.load_state_dict(state['state_dict'])
         predictor.optimizer.load_state_dict(state['optimizer'])
         predictor.scheduler.load_state_dict(state['scheduler'])
-        predictor.best_loss = state['best_loss']
+        predictor.best_loss = state.get('best_loss', float('inf'))
+        predictor.total_batches = state.get('total_batches', 0)
         return predictor

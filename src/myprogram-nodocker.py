@@ -127,8 +127,12 @@ if __name__ == '__main__':
                 vocab = pickle.load(f)
             print(f"\tVocab contains {len(vocab)} characters")
 
-        print('Instantiating model')
-        model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
+        if os.path.exists(os.path.join(args.work_dir, 'TransformerPredictor.pt')):
+            with TimerContext('Loading model'):
+                model = TransformerPredictor.load(args.work_dir)
+        else:
+            print('Instantiating model')
+            model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
         
         print('\nTraining model')
         for i_ in range(10):

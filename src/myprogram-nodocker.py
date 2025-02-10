@@ -136,10 +136,10 @@ if __name__ == '__main__':
                 # Build the iterator (pull-based streaming)
                 train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
 
-                train_pairs       = sample_stream(train_set_tensors, 0.05) # Sample 5% of the batches for diversity
+                train_pairs       = sample_stream(train_set_tensors, 0.01) # Sample 1% of the batches for diversity
                 train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
                 train_pairs       = create_random_length_sequence_pairs(train_pairs, 0, 100) # Create variable length sequences
-                train_pairs       = limerator(train_pairs, 10) # Limit to 1k batches so we have smthn to turn in
+                train_pairs       = limerator(train_pairs, 10_000) # Limit to 10k batches so we have smthn to turn in
                 
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")

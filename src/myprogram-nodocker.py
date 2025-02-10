@@ -32,7 +32,7 @@ limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('mode', choices=('prepare', 'process', 'train', 'test'), help='what to run')
+    parser.add_argument('mode', choices=('prepare', 'process', 'train', 'test', 'tui'), help='what to run')
     parser.add_argument('--data_dir', help='where to save', default='/gscratch/gutenberg')
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
@@ -166,7 +166,7 @@ if __name__ == '__main__':
             for line in f:
                 norm_line = combined_normalizer(line)
                 norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
-                test_data.append(combined_normalizer(line))
+                test_data.append(combined_normalizer(norm_line))
         test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
         test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
         
@@ -179,12 +179,28 @@ if __name__ == '__main__':
         model.write_pred(pred, args.test_output)
     
     elif args.mode == 'tui':
-        print('Loading model')
-        model = WeightedRandomPredictor.load(args.work_dir)
+        with TimerContext('Loading vocab'):
+            with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
+                vocab = pickle.load(f)
+            vocab_list = list(vocab.keys())
+            print(f"\tVocab contains {len(vocab)} characters")
+            
+        with TimerContext('Loading model'):
+            model = TransformerPredictor.load(args.work_dir)
         
         while True:
-            input = input('Input: ')
-            pred = model.run_pred([input])
-            print(pred)
+            line = input('Input: ')
+            
+            norm_line = combined_normalizer(line)
+            norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
+            test_data = [combined_normalizer(norm_line)]
+            
+            test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
+            test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
+            
+            pred_tensors = model.run_pred(test_data_stream)
+            pred = ["".join([vocab_list[i] for i in p]) if p != None else 'xxx' for p in pred_tensors]
+            
+            print('Prediction: {}'.format(pred[0]))
     else:
         raise NotImplementedError('Unknown mode {}'.format(args.mode))

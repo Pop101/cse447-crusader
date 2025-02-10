@@ -14,8 +14,22 @@ class TransformerPredictor(AbstractPredictor):
     def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers) -> None:
         super().__init__()
         self.model = TransformerModel(vocab_size, max_seq_length, embed_size, num_heads, num_layers).to(device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=0.0001)
-        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=0.0001,
+            betas=(0.9, 0.98),
+            eps=1e-9,
+            weight_decay=0.01
+        )
+        # Learning rate scheduler
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            self.optimizer,
+            T_0=10,  # Reset every 10 epochs
+            T_mult=2,  # Multiply period by 2 after each restart
+            eta_min=1e-6
+        )
+        
+        self.criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding token
         
         self.vocab_size = vocab_size
         self.max_seq_length = max_seq_length
@@ -23,17 +37,25 @@ class TransformerPredictor(AbstractPredictor):
         self.num_heads = num_heads
         self.num_layers = num_layers
         
+        self.best_loss = float('inf')
+        self.epochs_without_improvement = 0
+        
     def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
         self.model.train()
-        total_loss = 0
+        total_loss, total_batches = 0, 0
         for X, y in pair_iterator:
             self.optimizer.zero_grad()
             output = self.model(X)
             loss = self.criterion(output, y)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
             total_loss += loss.item()
-        return total_loss
+            total_batches += 1
+        
+        self.scheduler.step()
+        self.best_loss = min(self.best_loss, total_loss / total_batches)
+        return total_loss / total_batches
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         self.model.eval()
@@ -46,7 +68,7 @@ class TransformerPredictor(AbstractPredictor):
                     scaled_logits = output / temperature
                     probs = torch.softmax(scaled_logits, dim=-1)
                     
-                    top_n_values, top_n_indices = torch.topk(output, 3, dim=-1)
+                    top_n_values, top_n_indices = torch.topk(probs, 3, dim=-1)
                     
                     # Handle single item prediction
                     indices = top_n_indices.squeeze()
@@ -65,25 +87,31 @@ class TransformerPredictor(AbstractPredictor):
         # Save the model state dict and other necessary components
         state = {
             'state_dict': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
             'vocab_size': self.vocab_size,
             'max_seq_length': self.max_seq_length,
             'embed_size': self.embed_size,
             'num_heads': self.num_heads,
-            'num_layers': self.num_layers
+            'num_layers': self.num_layers,
+            'best_loss': self.best_loss
         }
-        torch.save(state, os.path.join(work_dir, 'model.pt'))
+        torch.save(state, os.path.join(work_dir, 'TransformerPredictor.pt'))
             
 
     @classmethod
     def load(cls, work_dir):
-        state = torch.load(os.path.join(work_dir, 'model.pt'), map_location=device)
+        state = torch.load(os.path.join(work_dir, 'TransformerPredictor.pt'), map_location=device)
         predictor = cls(
-                state['vocab_size'],
-                state['max_seq_length'], 
-                state['embed_size'],
-                state['num_heads'],
-                state['num_layers']
+            state['vocab_size'],
+            state['max_seq_length'], 
+            state['embed_size'],
+            state['num_heads'],
+            state['num_layers']
         )
         
         predictor.model.load_state_dict(state['state_dict'])
+        predictor.optimizer.load_state_dict(state['optimizer'])
+        predictor.scheduler.load_state_dict(state['scheduler'])
+        predictor.best_loss = state['best_loss']
         return predictor

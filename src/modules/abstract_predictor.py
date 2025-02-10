@@ -1,6 +1,6 @@
 # Model supplied by class
 
-from typing import Iterator, Any, Tuple
+from typing import Iterator, Any, Tuple, List
 import torch
 
 class AbstractPredictor:
@@ -22,7 +22,7 @@ class AbstractPredictor:
         """Trains the model for one epoch, returning the loss"""
         raise NotImplementedError('This model cannot be trained per-epoch')
     
-    def run_pred(self, data:list[str]) -> list[str]:
+    def run_pred(self, data:List[str]) -> List[str]:
         """Predicts on the given data"""
         raise NotImplementedError('This model cannot be used for prediction')
 

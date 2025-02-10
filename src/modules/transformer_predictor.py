@@ -8,14 +8,20 @@ from tqdm.auto import tqdm
 from modules.torchgpu import device
 import random
 import string
-from typing import Iterator, Tuple
+from typing import Iterator, Tuple, List
 
 class TransformerPredictor(AbstractPredictor):
-    def __init__(self, vocab_size, tensor_length, embed_size, num_heads, num_layers) -> None:
+    def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers) -> None:
         super().__init__()
-        self.model = TransformerModel(vocab_size, tensor_length, embed_size, num_heads, num_layers).to(device)
+        self.model = TransformerModel(vocab_size, max_seq_length, embed_size, num_heads, num_layers).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=0.0001)
         self.criterion = nn.CrossEntropyLoss()
+        
+        self.vocab_size = vocab_size
+        self.max_seq_length = max_seq_length
+        self.embed_size = embed_size
+        self.num_heads = num_heads
+        self.num_layers = num_layers
         
     def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
         self.model.train()
@@ -29,29 +35,55 @@ class TransformerPredictor(AbstractPredictor):
             total_loss += loss.item()
         return total_loss
     
-    def run_pred(self, data):
+    def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         self.model.eval()
+        preds = []
         with torch.no_grad():
-            preds = []
             for item in data:
                 try:
-                    in_tensor = self.dataset.string_to_tensor(item)
-                    in_tensor = in_tensor.unsqueeze(0).to(device)
-                    output = self.model(in_tensor)
+                    # Model now handles 1D tensor input internally
+                    output = self.model(item)
+                    scaled_logits = output / temperature
+                    probs = torch.softmax(scaled_logits, dim=-1)
+                    
                     top_n_values, top_n_indices = torch.topk(output, 3, dim=-1)
-                    top_n_chars = [self.dataset.idx_to_char[idx.item()] for idx in top_n_indices.squeeze()]
-                    preds.append("".join(top_n_chars))
-                except KeyError:
-                    preds.append("".join(random.choices(string.ascii_letters, k=3)))
-                    print(f"Warning: Unseen character in input \"{item}\". Replacing with random prediction.")
+                    
+                    # Handle single item prediction
+                    indices = top_n_indices.squeeze()
+                    if indices.dim() == 0:  # If only one prediction
+                        indices = indices.unsqueeze(0)
+                    
+                    # Dump indices into tensor
+                    preds.append(indices)
+                except KeyError as e:
+                    preds.append(None)
+                    print(f"Warning: Unseen character in input. Error: {str(e)}")
                     continue
         return preds
 
     def save(self, work_dir):
-        with open(os.path.join(work_dir, 'model.pkl'), 'wb') as f:
-            pickle.dump(self, f)
+        # Save the model state dict and other necessary components
+        state = {
+            'state_dict': self.model.state_dict(),
+            'vocab_size': self.vocab_size,
+            'max_seq_length': self.max_seq_length,
+            'embed_size': self.embed_size,
+            'num_heads': self.num_heads,
+            'num_layers': self.num_layers
+        }
+        torch.save(state, os.path.join(work_dir, 'model.pt'))
+            
 
     @classmethod
     def load(cls, work_dir):
-        with open(os.path.join(work_dir, 'model.pkl'), 'rb') as f:
-            return pickle.load(f)
+        state = torch.load(os.path.join(work_dir, 'model.pt'), map_location=device)
+        predictor = cls(
+                state['vocab_size'],
+                state['max_seq_length'], 
+                state['embed_size'],
+                state['num_heads'],
+                state['num_layers']
+        )
+        
+        predictor.model.load_state_dict(state['state_dict'])
+        return predictor

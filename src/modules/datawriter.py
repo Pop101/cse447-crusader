@@ -4,8 +4,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pathlib import Path
 from tqdm import tqdm
+from modules.torchgpu import device
+import glob
+import torch
 
-        
 def stream_to_single_parquet(iterator, output_path):
     """
     Stream iterator data to a single parquet file using pyarrow directly.
@@ -76,3 +78,13 @@ def stream_load_parquet(
         for batch_start in range(0, len(df), batch_size):
             batch_end = min(batch_start + batch_size, len(df))
             yield df.iloc[batch_start:batch_end]
+
+def stream_load_pt_glob(
+    globstr:str,
+    device=device
+):
+    """
+    Stream PyTorch tensors from a glob pattern.
+    """
+    for file in glob.glob(globstr):
+        yield torch.load(file, map_location=device, weights_only=True)

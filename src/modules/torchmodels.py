@@ -161,14 +161,12 @@ class TransformerModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_size,
             nhead=num_heads,
-            dropout=dropout,
-            batch_first=True
+            dropout=dropout
         )
         
         self.transformer = nn.TransformerEncoder(
             encoder_layer,
-            num_layers=num_layers,
-            enable_nested_tensor=True
+            num_layers=num_layers
         )
         
         self.fc = nn.Linear(embed_size, vocab_size)
@@ -180,6 +178,10 @@ class TransformerModel(nn.Module):
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len)
         """
+        # Ensure input is 2D
+        if x.dim() == 1:
+            x = x.unsqueeze(0)  # Add batch dimension if missing
+            
         batch_size, seq_len = x.shape
         
         # Create position indices for the actual sequence length
@@ -187,20 +189,30 @@ class TransformerModel(nn.Module):
         positions = positions.unsqueeze(0).expand(batch_size, -1)
         
         # Get embeddings
-        word_embeddings = self.embedding(x)
+        word_embeddings = self.embedding(x)  # Shape: (batch_size, seq_len, embed_size)
         pos_embeddings = self.pos_embedding(positions)
         
         # Combine embeddings & Dropout
         x = self.dropout(word_embeddings + pos_embeddings)
         
-        # Create padding mask
-        padding_mask = (x == 0).any(dim=-1)
+        # Transpose for transformer input (seq_len, batch_size, embed_size)
+        x = x.transpose(0, 1)
+        
+        # Create padding mask (batch_size, seq_len)
+        padding_mask = (x.transpose(0, 1) == 0).all(dim=-1)
         
         # Pass through transformer
         x = self.transformer(x, src_key_padding_mask=padding_mask)
         
-        # Get final token representation
-        return self.fc(x[:, -1, :])
+        # Take last non-padded position for each sequence
+        x = x.transpose(0, 1)  # (batch_size, seq_len, embed_size)
+        last_positions = (~padding_mask).sum(dim=1) - 1
+        last_positions = torch.clamp(last_positions, min=0)
+        batch_indices = torch.arange(batch_size, device=x.device)
+        last_hidden = x[batch_indices, last_positions]
+        
+        # Get final prediction
+        return self.fc(last_hidden)
 
 def create_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],

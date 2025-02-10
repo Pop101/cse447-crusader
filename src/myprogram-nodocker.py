@@ -10,7 +10,7 @@ from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTe
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs, create_random_length_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
-from modules.datawriter import stream_to_single_parquet, stream_load_parquet
+from modules.datawriter import stream_to_single_parquet, stream_load_parquet, stream_load_pt_glob
 from modules.streamutil import chunker, sample_stream
 from modules.pprint import TimerContext
 from modules.torchgpu import device
@@ -104,18 +104,18 @@ if __name__ == '__main__':
         train_set         = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet')) # Read from disk (too big for ram)
         train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
         train_set_tensors = stream_to_tensors(train_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
-        train_set_tensors = map(lambda x: pd.DataFrame(x), chunker(train_set_tensors, 10_000))
         
         with TimerContext('Writing training tensors to disk'):
-            stream_to_single_parquet(train_set_tensors, os.path.join(args.work_dir, 'train_tensors.parquet'))
+            for i, batch in enumerate(chunker(train_set_tensors, 10_000)):
+                torch.save(torch.stack(batch), os.path.join(args.work_dir, f'train_tensors_{i}.pt'))
         
         val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
         val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten
         val_set_tensors = stream_to_tensors(val_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
-        val_set_tensors = map(lambda x: pd.DataFrame(x), chunker(val_set_tensors, 10_000))
         
         with TimerContext('Writing validation tensors to disk'):
-            stream_to_single_parquet(val_set_tensors, os.path.join(args.work_dir, 'val_tensors.parquet'))
+            for i, batch in enumerate(chunker(val_set_tensors, 10_000)):
+                torch.save(torch.stack(batch), os.path.join(args.work_dir, f'val_tensors_{i}.pt'))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):
@@ -128,40 +128,51 @@ if __name__ == '__main__':
             print(f"\tVocab contains {len(vocab)} characters")
 
         print('Instantiating model')
-        model = TransformerPredictor(len(vocab), 100, 512, 8, 6)
+        model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
         
         print('\nTraining model')
         for i_ in range(10):
             with TimerContext(f'Epoch {i_}'):
                 # Build the iterator (pull-based streaming)
-                train_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
-                train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
-                train_set_tensors = stream_to_tensors(train_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
-                train_pairs       = create_random_length_sequence_pairs(train_set_tensors, 0, 100) # Create variable length sequences
-                train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the data
+                train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
+
+                train_pairs       = sample_stream(train_set_tensors, 0.05) # Sample 5% of the batches for diversity
+                train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
+                train_pairs       = create_random_length_sequence_pairs(train_pairs, 0, 100) # Create variable length sequences
+                train_pairs       = limerator(train_pairs, 10) # Limit to 1k batches so we have smthn to turn in
                 
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")
                 
                 # Try to outrun oom (it wont work)
-                del train_pairs, train_set_tensors, train_set_texts, train_set
+                del train_pairs, train_set_tensors
         
             print('Saving model')
             model.save(args.work_dir)
         
     elif args.mode == 'test':
-        print('Loading model')
-        model = TransformerPredictor.load(args.work_dir)
+        with TimerContext('Loading vocab'):
+            with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
+                vocab = pickle.load(f)
+            vocab_list = list(vocab.keys())
+            print(f"\tVocab contains {len(vocab)} characters")
+            
+        with TimerContext('Loading model'):
+            model = TransformerPredictor.load(args.work_dir)
         
         print('Loading test data from {}'.format(args.test_data))
         test_data = []
         with open(args.test_data) as f:
             for line in f:
+                norm_line = combined_normalizer(line)
+                norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
                 test_data.append(combined_normalizer(line))
-
+        test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
+        test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
         
         print('Making predictions')
-        pred = model.run_pred(test_data)
+        pred_tensors = model.run_pred(test_data_stream)
+        pred = ["".join([vocab_list[i] for i in p]) if p != None else 'xxx' for p in pred_tensors]
         
         print('Writing predictions to {}'.format(args.test_output))
         assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))

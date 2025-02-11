@@ -16,7 +16,7 @@ class TransformerPredictor(AbstractPredictor):
         self.model = TransformerModel(vocab_size, max_seq_length, embed_size, num_heads, num_layers).to(device)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=0.0001,
+            lr=0.001,
             betas=(0.9, 0.98),
             eps=1e-9,
             weight_decay=0.01
@@ -39,17 +39,21 @@ class TransformerPredictor(AbstractPredictor):
         
         self.best_loss = float('inf')
         self.total_batches = 0
-        
+  
     def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
         self.model.train()
         epoch_loss, epoch_batches = 0, 0
         for X, y in pair_iterator:
             self.optimizer.zero_grad()
+            
             output = self.model(X)
+            
             loss = self.criterion(output, y)
             loss.backward()
+            
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
+            
             epoch_loss += loss.item()
             epoch_batches += 1
         

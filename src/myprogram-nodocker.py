@@ -133,9 +133,9 @@ if __name__ == '__main__':
         else:
             print('Instantiating model')
             model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
-        
+
         print('\nTraining model')
-        MIN_EPOCHS = 3
+        MIN_EPOCHS = 10
         consecutive_no_improvement = 0
         best_loss = float('inf')
         epoch = 0

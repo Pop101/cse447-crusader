@@ -197,6 +197,9 @@ class TransformerModel(nn.Module):
             
         batch_size, seq_len = x.shape
         
+        # Create padding mask
+        padding_mask = (x == 0)
+        
         # Create position indices
         positions = torch.arange(0, seq_len, device=x.device)
         positions = positions.unsqueeze(0).expand(batch_size, -1)
@@ -209,19 +212,18 @@ class TransformerModel(nn.Module):
         x = self.dropout(word_embeddings + pos_embeddings)
         x = self.layer_norm1(x)
         
-        # Create padding mask
-        padding_mask = (x == 0).all(dim=-1)
-        
         # Pass through transformer
         x = x.transpose(0, 1) # Transformer expects shape: (seq_len, batch_size, embed_size)
         x = self.transformer(x, src_key_padding_mask=padding_mask) 
         x = x.transpose(0, 1) # Back to (batch_size, seq_len, embed_size)
         
         # Get final sequence representation
-        x = self.projection(x[:, -1, :])
+        last_non_pad  = (~padding_mask).to(torch.long).sum(dim=1) - 1
+        batch_indices = torch.arange(batch_size, device=x.device)
+        x             = self.projection(x[batch_indices, last_non_pad])
+        logits        = self.fc(x)
         
-        return self.fc(x)
-
+        return logits
 def create_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],
     sequence_length: int,

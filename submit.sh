@@ -22,7 +22,7 @@ mkdir -p submit/work
 rsync -av --exclude='*.parquet' --exclude='*_tensors_*.pt' work/ submit/work/
 
 # Submit files in root directory
-find . -maxdepth 1 -type f ! -lname '*' -exec cp {} submit/ \;
+find . -maxdepth 1 -type f ! -lname '*' ! -name '*.zip' -exec cp {} submit/ \;
 
 # make zip file
 zip -r Project447Group3.zip submit

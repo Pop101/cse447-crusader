@@ -135,7 +135,7 @@ if __name__ == '__main__':
             model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
 
         print('\nTraining model')
-        MIN_EPOCHS = 10
+        MIN_EPOCHS = 99999
         consecutive_no_improvement = 0
         best_loss = float('inf')
         epoch = 0
@@ -147,7 +147,7 @@ if __name__ == '__main__':
                 train_pairs       = sample_stream(train_set_tensors, 0.05) # Sample 5% of the batch-sets for diversity
                 train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
                 train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the batches for more diversity
-                train_pairs       = create_random_length_sequence_pairs(train_pairs, 0, 100) # Create variable length sequences
+                train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
                 
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")
@@ -174,6 +174,7 @@ if __name__ == '__main__':
             
         with TimerContext('Loading model'):
             model = TransformerPredictor.load(args.work_dir)
+            print(f"\tModel loaded, total batches: {model.total_batches}")
         
         print('Loading test data from {}'.format(args.test_data))
         test_data = []
@@ -181,7 +182,7 @@ if __name__ == '__main__':
             for line in f:
                 norm_line = combined_normalizer(line)
                 norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
-                test_data.append(combined_normalizer(norm_line))
+                test_data.append(combined_normalizer(line))
         test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
         test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
         

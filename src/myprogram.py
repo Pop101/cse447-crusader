@@ -55,6 +55,7 @@ if __name__ == '__main__':
             
         with TimerContext('Loading model'):
             model = TransformerPredictor.load(args.work_dir)
+            print(f"\tModel loaded, total batches: {model.total_batches}")
         
         print('Loading test data from {}'.format(args.test_data))
         test_data = []
@@ -63,6 +64,7 @@ if __name__ == '__main__':
                 norm_line = combined_normalizer(line)
                 norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
                 test_data.append(combined_normalizer(line))
+                
         test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
         test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
         

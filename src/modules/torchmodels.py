@@ -272,12 +272,17 @@ def create_random_length_sequence_pairs(
     for batch in batched_tensors:
         batch_size = batch.size(0)
         
-        effective_lengths = torch.randint(
-            min_sequence_length,
-            max_sequence_length,
-            (batch_size,),
+        # Generate random effective lengths, normal distribution
+        mean = (min_sequence_length + max_sequence_length) / 2
+        std = (max_sequence_length - min_sequence_length) / 6
+        effective_lengths = torch.normal(
+            mean=mean,
+            std=std,
+            size=(batch_size,),
             device=batch.device
         )
+        effective_lengths = torch.clamp(effective_lengths, min_sequence_length, max_sequence_length)
+        effective_lengths = torch.round(effective_lengths).long()
         
         # Create position indices tensor
         positions = torch.arange(max_sequence_length-1, device=batch.device).expand(batch_size, -1)

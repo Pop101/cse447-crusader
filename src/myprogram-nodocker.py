@@ -147,7 +147,8 @@ if __name__ == '__main__':
                 train_pairs       = sample_stream(train_set_tensors, 0.05) # Sample 5% of the batch-sets for diversity
                 train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
                 train_pairs       = sample_stream(train_pairs, 0.1) # Sample 10% of the batches for more diversity
-                train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
+                #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
+                train_pairs       = create_sequence_pairs(train_pairs, 100) # Create fixed length sequences
                 
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")

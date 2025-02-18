@@ -272,29 +272,28 @@ def create_random_length_sequence_pairs(
     for batch in batched_tensors:
         batch_size = batch.size(0)
         
-        # Generate random effective lengths, normal distribution
+        # Now transform to approximate normal distribution
+        # Using Box-Muller transform on integers
+        u1 = torch.rand(batch_size, device=batch.device)
+        z = torch.sqrt(-2.0 * torch.log(u1)) * torch.cos(2.0 * torch.pi * torch.rand_like(u1))
+        
+        # Scale and shift to desired range
         mean = (min_sequence_length + max_sequence_length) / 2
         std = (max_sequence_length - min_sequence_length) / 6
-        effective_lengths = torch.normal(
-            mean=mean,
-            std=std,
-            size=(batch_size,),
-            device=batch.device
-        )
-        effective_lengths = torch.clamp(effective_lengths, min_sequence_length, max_sequence_length)
-        effective_lengths = torch.round(effective_lengths).long()
+        lengths = ((z * std) + mean).long()
+        lengths = torch.clamp(lengths, min=min_sequence_length, max=max_sequence_length)
         
         # Create position indices tensor
         positions = torch.arange(max_sequence_length-1, device=batch.device).expand(batch_size, -1)
         
         # Create mask where positions are less than effective_lengths
-        mask = positions < effective_lengths.unsqueeze(1)
+        mask = positions < lengths.unsqueeze(1)
         
         # Get X and apply mask
         X = batch[:, :-1] * mask
         
         # Get y values at effective_lengths positions
-        y = torch.gather(batch, 1, effective_lengths.unsqueeze(1)).squeeze(1)
+        y = torch.gather(batch, 1, lengths.unsqueeze(1)).squeeze(1)
         
         yield (X, y)
 

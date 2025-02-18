@@ -60,7 +60,7 @@ class TransformerPredictor(AbstractPredictor):
         self.scheduler.step()
         self.best_loss = min(self.best_loss, epoch_loss / epoch_batches if epoch_batches > 0 else float('inf'))
         self.total_batches += epoch_batches
-        return epoch_loss / epoch_batches
+        return epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         self.model.eval()

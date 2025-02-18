@@ -242,14 +242,9 @@ def create_sequence_pairs(
     """
     
     for batch in batched_tensors:
-        for i in range(batch.size(1) - sequence_length):
-            # Input sequence: sequence_length-1 characters
-            X = batch[:, i:i+sequence_length-1]
-            
-            # Target: next character after the sequence
-            y = batch[:, i+sequence_length-1:i+sequence_length]
-            
-            yield (X, y)
+        X = batch[:, :-1]
+        y = batch[:, -1:].squeeze(-1)
+        yield (X, y)
         
 def create_random_length_sequence_pairs(
     batched_tensors: Iterator[torch.Tensor],

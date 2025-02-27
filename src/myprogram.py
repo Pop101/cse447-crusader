@@ -10,6 +10,7 @@ from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTe
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs, create_random_length_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
+from modules.rnn_predictor import RNNPredictor
 from modules.datawriter import stream_to_single_parquet, stream_load_parquet, stream_load_pt_glob
 from modules.streamutil import chunker, sample_stream
 from modules.pprint import TimerContext
@@ -54,7 +55,7 @@ if __name__ == '__main__':
             print(f"\tVocab contains {len(vocab)} characters")
             
         with TimerContext('Loading model'):
-            model = TransformerPredictor.load(args.work_dir)
+            model = RNNPredictor.load(args.work_dir)
             print(f"\tModel loaded, total batches: {model.total_batches}")
         
         print('Loading test data from {}'.format(args.test_data))

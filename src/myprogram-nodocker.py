@@ -10,6 +10,7 @@ from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTe
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs, create_random_length_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
+from modules.rnn_predictor import RNNPredictor
 from modules.datawriter import stream_to_single_parquet, stream_load_parquet, stream_load_pt_glob
 from modules.streamutil import chunker, sample_stream
 from modules.pprint import TimerContext
@@ -127,12 +128,12 @@ if __name__ == '__main__':
                 vocab = pickle.load(f)
             print(f"\tVocab contains {len(vocab)} characters")
 
-        if os.path.exists(os.path.join(args.work_dir, 'TransformerPredictor.pt')):
+        if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
             with TimerContext('Loading model'):
-                model = TransformerPredictor.load(args.work_dir)
+                model = RNNPredictor.load(args.work_dir)
         else:
             print('Instantiating model')
-            model = TransformerPredictor(len(vocab), 99, 512, 8, 6)
+            model = RNNPredictor(len(vocab), 99, hidden_size=1024, num_layers=8, num_heads=16)
 
         print('\nTraining model')
         MIN_EPOCHS = 99999

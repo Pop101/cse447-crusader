@@ -41,6 +41,7 @@ limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('mode', choices=('prepare', 'process', 'train', 'test', 'tui'), help='what to run')
+    parser.add_argument('--model', choices=('rnn', 'transformer'), help='what model to use', default='transformer')
     parser.add_argument('--data_dir', help='where to save', default='/gscratch/gutenberg')
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
@@ -134,12 +135,20 @@ if __name__ == '__main__':
                 vocab = pickle.load(f)
             print(f"\tVocab contains {len(vocab)} characters")
 
-        if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
-            with TimerContext('Loading model'):
-                model = RNNPredictor.load(args.work_dir)
-        else:
-            print('Instantiating model')
-            model = RNNPredictor(len(vocab), CHARS_PER_SAMPLE-1, hidden_size=512, num_layers=6, num_heads=8)
+        if args.model == 'transformer':
+            if os.path.exists(os.path.join(args.work_dir, 'TransformerPredictor.pt')):
+                with TimerContext('Loading Transformer Model'):
+                    model = TransformerPredictor.load(args.work_dir)
+            else:
+                print('Instantiating Transformer Model')
+                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE-1, hidden_size=512, num_layers=6, num_heads=8)
+        elif args.model == 'rnn':
+            if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
+                with TimerContext('Loading RNN Model'):
+                    model = RNNPredictor.load(args.work_dir)
+            else:
+                print('Instantiating RNN Model')
+                model = RNNPredictor(len(vocab), CHARS_PER_SAMPLE-1, hidden_size=512, num_layers=6, num_heads=8)
 
         print('\nTraining model')
         MIN_EPOCHS = 99999
@@ -181,9 +190,14 @@ if __name__ == '__main__':
             vocab_list = list(vocab.keys())
             print(f"\tVocab contains {len(vocab)} characters")
             
-        with TimerContext('Loading model'):
-            model = TransformerPredictor.load(args.work_dir)
-            print(f"\tModel loaded, total batches: {model.total_batches}")
+        if args.model == 'transformer':
+            with TimerContext('Loading model'):
+                model = TransformerPredictor.load(args.work_dir)
+                print(f"\tTransformer Model loaded, total batches: {model.total_batches}")
+        elif args.model == 'rnn':
+            with TimerContext('Loading model'):
+                model = RNNPredictor.load(args.work_dir)
+                print(f"\tRNN Model loaded, total batches: {model.total_batches}")
         
         print('Loading test data from {}'.format(args.test_data))
         test_data = []

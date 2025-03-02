@@ -9,3 +9,5 @@ data-*
 
 *.out
 *.zip
+
+*_old*

@@ -20,7 +20,7 @@ import pandas as pd
 from itertools import islice, chain
 import pickle
 
-combined_normalizer = GutenbergNormalizer() + StringNormalizer(remove_punct=False, lowercase=False)
+combined_normalizer = StringNormalizer(remove_punct=False, lowercase=False)
 
 # Data is located here:
 # Leon's machine: '/mnt/e/data/gutenberg'
@@ -28,6 +28,13 @@ combined_normalizer = GutenbergNormalizer() + StringNormalizer(remove_punct=Fals
 
 TRAIN_DIR = './data-train'
 VAL_DIR   = './data-val'
+
+# General Args
+CHARS_PER_SAMPLE = 100
+
+# Prepare args
+BATCH_SIZE = 512
+BATCHES_PER_FILE = 5_000
 
 limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
 
@@ -49,22 +56,21 @@ if __name__ == '__main__':
             print('Making working directory {}'.format(args.work_dir))
             os.makedirs(args.work_dir)
             
-        print('Performing Test/Train Split')
-        splitter  = SymlinkTestTrainSplit(args.data_dir, {
-            TRAIN_DIR: 0.75,
-            VAL_DIR: 0.25
-        })
-        splitter.split(random_state=42, verbose=True)
+        # print('Performing Test/Train Split')
+        # splitter  = SymlinkTestTrainSplit(args.data_dir, {
+        #     TRAIN_DIR: 1
+        # })
+        # splitter.split(random_state=42, verbose=True)
         
         
         print('Learning Vocab & Writing to .parquet')
         
-        train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
-        val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=100, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
+        train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=CHARS_PER_SAMPLE, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
+        # val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=CHARS_PER_SAMPLE, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
         
         # Transform to chunks, then to pandas
-        train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, 1_000))
-        val_set   = map(lambda x: pd.DataFrame(x), chunker(val_set, 1_000))
+        train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, BATCHES_PER_FILE))
+        # val_set   = map(lambda x: pd.DataFrame(x), chunker(val_set, BATCHES_PER_FILE))
         
         # Learn vocab DURING iterator consume
         vocab = {'<PAD>': [0, 0], '<UNK>': [0, 0]}
@@ -76,20 +82,20 @@ if __name__ == '__main__':
                     vocab[char][1] += 1
         
         train_set = map(lambda df: learn_vocab(df) or df, train_set)
-        val_set   = map(lambda df: learn_vocab(df) or df, val_set)
+        # val_set   = map(lambda df: learn_vocab(df) or df, val_set)
         
         # Stream iterator to disk        
         train_file = os.path.join(args.work_dir, 'train.parquet')
-        val_file   = os.path.join(args.work_dir, 'val.parquet')
+        # val_file   = os.path.join(args.work_dir, 'val.parquet')
         stream_to_single_parquet(train_set, train_file)
-        stream_to_single_parquet(val_set, val_file)
+        # stream_to_single_parquet(val_set, val_file)
         
         # Save vocab to disk
         with open(os.path.join(args.work_dir, 'vocab.pkl'), 'wb') as f:
             pickle.dump(vocab, f)
             
         print("Size of training set:\t{:.2f} MB".format(os.path.getsize(train_file) / 1e6))
-        print("Size of validation set:\t{:.2f} MB".format(os.path.getsize(val_file) / 1e6))
+        # print("Size of validation set:\t{:.2f} MB".format(os.path.getsize(val_file) / 1e6))
     elif args.mode == 'process':
         # Process step converts training and validation data to tensors
         if not os.path.isdir(args.work_dir):
@@ -104,18 +110,18 @@ if __name__ == '__main__':
             
         train_set         = stream_load_parquet(os.path.join(args.work_dir, 'train.parquet')) # Read from disk (too big for ram)
         train_set_texts   = chain.from_iterable(df['text'].values for df in train_set) # Select only text column, flatten
-        train_set_tensors = stream_to_tensors(train_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+        train_set_tensors = stream_to_tensors(train_set_texts, 100, BATCH_SIZE, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
         
         with TimerContext('Writing training tensors to disk'):
-            for i, batch in enumerate(chunker(train_set_tensors, 10_000)):
+            for i, batch in enumerate(chunker(train_set_tensors, BATCHES_PER_FILE)):
                 torch.save(torch.stack(batch), os.path.join(args.work_dir, f'train_tensors_{i}.pt'))
         
         val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
         val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten
-        val_set_tensors = stream_to_tensors(val_set_texts, 100, 128, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+        val_set_tensors = stream_to_tensors(val_set_texts, 100, BATCH_SIZE, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
         
         with TimerContext('Writing validation tensors to disk'):
-            for i, batch in enumerate(chunker(val_set_tensors, 10_000)):
+            for i, batch in enumerate(chunker(val_set_tensors, BATCHES_PER_FILE)):
                 torch.save(torch.stack(batch), os.path.join(args.work_dir, f'val_tensors_{i}.pt'))
         
     elif args.mode == 'train':
@@ -133,7 +139,7 @@ if __name__ == '__main__':
                 model = RNNPredictor.load(args.work_dir)
         else:
             print('Instantiating model')
-            model = RNNPredictor(len(vocab), 99, hidden_size=1024, num_layers=8, num_heads=16)
+            model = RNNPredictor(len(vocab), CHARS_PER_SAMPLE-1, hidden_size=512, num_layers=6, num_heads=8)
 
         print('\nTraining model')
         MIN_EPOCHS = 99999
@@ -145,11 +151,12 @@ if __name__ == '__main__':
                 # Build the iterator (pull-based streaming)
                 train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
 
-                train_pairs       = sample_stream(train_set_tensors, 0.1) # Sample 10% of the batch-sets for diversity
+                train_pairs       = train_set_tensors
+                #train_pairs       = sample_stream(train_set_tensors, 0.3) # Sample 10% of the batch-sets for diversity
                 train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
-                train_pairs       = sample_stream(train_pairs, 0.05) # Sample 5% of the batches for more diversity
+                #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 5% of the batches for more diversity
                 #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
-                train_pairs       = create_sequence_pairs(train_pairs, 100) # Create fixed length sequences
+                train_pairs       = create_sequence_pairs(train_pairs, CHARS_PER_SAMPLE) # Create fixed length sequences
                 
                 loss = model.train_epoch(train_pairs)
                 print(f"Loss: {loss}")

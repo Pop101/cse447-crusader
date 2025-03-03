@@ -145,16 +145,14 @@ class RNNPredictor(AbstractPredictor):
             num_heads=num_heads
         ).to(device)
         
-        # Faster optimizer with reasonable defaults
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=0.001,
+            lr=0.01,
             betas=(0.9, 0.999),
             eps=1e-8,
             weight_decay=0.01
         )
         
-        # Reduce learning rate on plateau
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='min',
@@ -163,7 +161,6 @@ class RNNPredictor(AbstractPredictor):
             min_lr=1e-6
         )
         
-        # Loss function (optional label smoothing)
         self.criterion = nn.CrossEntropyLoss(
             ignore_index=0,  # Ignore padding token
             label_smoothing=0.1

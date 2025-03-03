@@ -117,7 +117,10 @@ class TransformerPredictor(AbstractPredictor):
             min_lr=1e-6
         )
         
-        self.criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding token
+        self.criterion = nn.CrossEntropyLoss(
+            ignore_index=0,  # Ignore padding token
+            label_smoothing=0.1
+        )
         
         self.vocab_size = vocab_size
         self.max_seq_length = max_seq_length

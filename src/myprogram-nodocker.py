@@ -115,7 +115,13 @@ if __name__ == '__main__':
         
         with TimerContext('Writing training tensors to disk'):
             for i, batch in enumerate(chunker(train_set_tensors, BATCHES_PER_FILE)):
-                torch.save(torch.stack(batch), os.path.join(args.work_dir, f'train_tensors_{i}.pt'))
+                # If batch has items and the last tensor has a different shape from the first, drop it
+                if batch and len(batch) > 1 and batch[0].shape != batch[-1].shape:
+                    batch = batch[:-1] 
+                    
+                # Save
+                if batch:
+                    torch.save(torch.stack(batch), os.path.join(args.work_dir, f'train_tensors_{i}.pt'))
         
         val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
         val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten

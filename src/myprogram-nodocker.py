@@ -152,7 +152,7 @@ if __name__ == '__main__':
                     model = TransformerPredictor.load(args.work_dir)
             else:
                 print('Instantiating Transformer Model')
-                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE-1, embed_size=256, num_heads=4, num_layers=3)
+                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE-1, embed_size=256, num_heads=8, num_layers=3)
         elif args.model == 'rnn':
             if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
                 with TimerContext('Loading RNN Model'):

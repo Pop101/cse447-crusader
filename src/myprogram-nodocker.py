@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
-from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer
+from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer, ASCIINormalizer
 from modules.torchmodels import CharTensorDataset, NgramCharTensorSet, stream_to_tensors, create_sequence_pairs, create_random_length_sequence_pairs
 from modules.transformer_predictor import TransformerPredictor
 from modules.rnn_predictor import RNNPredictor
@@ -20,7 +20,7 @@ import pandas as pd
 from itertools import islice, chain
 import pickle
 
-combined_normalizer = StringNormalizer(remove_punct=False, lowercase=False)
+combined_normalizer = StringNormalizer(remove_punct=False, lowercase=False) + ASCIINormalizer(threshold=0.4)
 
 # Data is located here:
 # Leon's machine: '/mnt/e/data/gutenberg'
@@ -69,10 +69,14 @@ if __name__ == '__main__':
         train_set = FixedLengthDataloader(TRAIN_DIR, fixed_length=CHARS_PER_SAMPLE, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
         # val_set   = FixedLengthDataloader(VAL_DIR,   fixed_length=CHARS_PER_SAMPLE, overlap_size=10, skip_shorter_than=0, filters=[combined_normalizer])
         
+        # Drop all short texts
+        train_set = filter(lambda x: len(x['text']) >= 5, train_set)
+        # val_set   = filter(lambda x: len(x['text']) >= 5, val_set)
+        
         # Transform to chunks, then to pandas
         train_set = map(lambda x: pd.DataFrame(x), chunker(train_set, BATCHES_PER_FILE))
         # val_set   = map(lambda x: pd.DataFrame(x), chunker(val_set, BATCHES_PER_FILE))
-        
+
         # Learn vocab DURING iterator consume
         vocab = {'<PAD>': [0, 0], '<UNK>': [0, 0]}
         def learn_vocab(df):
@@ -123,13 +127,14 @@ if __name__ == '__main__':
                 if batch:
                     torch.save(torch.stack(batch), os.path.join(args.work_dir, f'train_tensors_{i}.pt'))
         
-        val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
-        val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten
-        val_set_tensors = stream_to_tensors(val_set_texts, 100, BATCH_SIZE, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
-        
-        with TimerContext('Writing validation tensors to disk'):
-            for i, batch in enumerate(chunker(val_set_tensors, BATCHES_PER_FILE)):
-                torch.save(torch.stack(batch), os.path.join(args.work_dir, f'val_tensors_{i}.pt'))
+        if os.path.exists(os.path.join(args.work_dir, 'val.parquet')):
+            val_set         = stream_load_parquet(os.path.join(args.work_dir, 'val.parquet')) # Read from disk (too big for ram)
+            val_set_texts   = chain.from_iterable(df['text'].values for df in val_set) # Select only text column, flatten
+            val_set_tensors = stream_to_tensors(val_set_texts, 100, BATCH_SIZE, lambda x: vocab.get(x, vocab['<UNK>'])[0]) # Convert to tensors w vocab
+            
+            with TimerContext('Writing validation tensors to disk'):
+                for i, batch in enumerate(chunker(val_set_tensors, BATCHES_PER_FILE)):
+                    torch.save(torch.stack(batch), os.path.join(args.work_dir, f'val_tensors_{i}.pt'))
         
     elif args.mode == 'train':
         if not os.path.isdir(args.work_dir):
@@ -162,28 +167,29 @@ if __name__ == '__main__':
         best_loss = float('inf')
         epoch = 0
         while consecutive_no_improvement < MIN_EPOCHS:
-            with TimerContext(f'Epoch {epoch}'):
-                # Build the iterator (pull-based streaming)
-                train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
+            print(f"Epoch {epoch}")
+            
+            # Build the iterator (pull-based streaming)
+            train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
 
-                train_pairs       = train_set_tensors
-                #train_pairs       = sample_stream(train_set_tensors, 0.3) # Sample 10% of the batch-sets for diversity
-                train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
-                #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 5% of the batches for more diversity
-                #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
-                train_pairs       = create_sequence_pairs(train_pairs, CHARS_PER_SAMPLE) # Create fixed length sequences
-                
-                loss = model.train_epoch(train_pairs)
-                print(f"Loss: {loss}")
-                # print(f"Best Loss: {model.best_loss}")
-                print(f"Total Batches: {model.total_batches}")
-                
-                # Check for convergence
-                if loss < best_loss:
-                    best_loss = loss
-                    consecutive_no_improvement = 0
-                else:
-                    consecutive_no_improvement += 1
+            train_pairs       = train_set_tensors
+            #train_pairs       = sample_stream(train_set_tensors, 0.3) # Sample 30% of the batch-sets for diversity
+            train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
+            #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
+            #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
+            train_pairs       = create_sequence_pairs(train_pairs, CHARS_PER_SAMPLE) # Create fixed length sequences
+            
+            loss = model.train_epoch(tqdm(train_pairs))
+            print(f"Loss: {loss}")
+            # print(f"Best Loss: {model.best_loss}")
+            print(f"Total Batches: {model.total_batches}")
+            
+            # Check for convergence
+            if loss < best_loss:
+                best_loss = loss
+                consecutive_no_improvement = 0
+            else:
+                consecutive_no_improvement += 1
         
             print('Saving model')
             model.save(args.work_dir)

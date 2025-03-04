@@ -61,7 +61,21 @@ class StringNormalizer(Normalizer):
         if self.normalize_whitespace:
             string = regex.sub(r'\s+', ' ', string)
         return string
+
+class ASCIINormalizer(Normalizer):
+    """ Normalizes strings by removing non-ASCII characters, with threshold for removing entire strings if they contain less than X% ASCII characters """
     
+    def __init__(self, threshold=0.0):
+        super().__init__()
+        self.threshold = threshold
+    
+    def __call__(self, string):
+        chars = len(string)
+        min_ascii_chars = int(self.threshold * chars)
+        pruned_str = ''.join([c for c in string if ord(c) < 128])
+        if len(pruned_str) < min_ascii_chars:
+            return ''
+        return pruned_str
 class StemmerNormalizer(Normalizer):
     """ Normalizes strings by stemming words """
     

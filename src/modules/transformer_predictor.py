@@ -88,7 +88,7 @@ class TransformerModel(nn.Module):
         return logits
     
 class TransformerPredictor(AbstractPredictor):
-    def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers) -> None:
+    def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers, accumulation_steps=4) -> None:
         super().__init__()
         self.model = TransformerModel(vocab_size, max_seq_length, embed_size, num_heads, num_layers).to(device)
         
@@ -119,6 +119,8 @@ class TransformerPredictor(AbstractPredictor):
         self.num_heads = num_heads
         self.num_layers = num_layers
         
+        self.accumulation_steps = accumulation_steps
+        
         self.best_loss = float('inf')
         self.total_batches = 0
   
@@ -126,38 +128,63 @@ class TransformerPredictor(AbstractPredictor):
         self.model.train()
         epoch_loss, epoch_batches = 0, 0
         
-        for X, y in pair_iterator:
-            X = X.to(device)
-            y = y.to(device)
-            
-            self.optimizer.zero_grad()
-            
-            output = self.model(X)
-            
-            # Reshape if needed for CrossEntropyLoss
-            if output.dim() == 3:  # [batch_size, seq_len, vocab_size]
-                if y.dim() == 1:  # If y is [batch_size], use only the last token prediction
-                    # Extract just the last token's prediction for each sequence
-                    output = output[:, -1, :]  # Shape: [batch_size, vocab_size]
-                else:  # If y is [batch_size, seq_len], reshape both
-                    output = output.view(-1, self.vocab_size)
-                    y = y.view(-1)
-            
-            loss = self.criterion(output, y)
-            loss.backward()
-            
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            self.optimizer.step()
-            
-            epoch_loss += loss.item()
-            epoch_batches += 1
+        accumulation_steps = 4  # Accumulate over 4 batches
         
+        self.optimizer.zero_grad()
+        
+        for i, (X, y) in enumerate(pair_iterator):
+            try:
+                # Forward pass
+                output = self.model(X)
+                
+                # Handle reshaping for loss calculation
+                if output.dim() == 3:  # [batch_size, seq_len, vocab_size]
+                    if y.dim() == 1:  # Single target per sequence
+                        output = output[:, -1, :]
+                    else:  # Target for each position
+                        output = output.view(-1, self.vocab_size)
+                        y = y.view(-1)
+                
+                loss = self.criterion(output, y) / accumulation_steps
+                loss.backward()
+                
+                # Update weights every accumulation_steps
+                if (i + 1) % accumulation_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
+                    
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    
+                    torch.cuda.empty_cache()
+                
+                # Track statistics
+                epoch_loss += loss.item() * accumulation_steps
+                epoch_batches += 1
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower() or "illegal memory" in str(e).lower():
+                    print("WARNING: CUDA memory error, skipping batch")
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    continue
+                else:
+                    # Re-raise other errors
+                    raise e
+        
+        # Handle any remaining gradients
+        if epoch_batches % accumulation_steps != 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        
+        # Calculate average loss
         avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
         
         # Update scheduler
         self.scheduler.step(avg_loss)
         self.best_loss = min(self.best_loss, avg_loss)
         self.total_batches += epoch_batches
+        
         return avg_loss
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:

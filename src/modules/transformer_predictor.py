@@ -22,7 +22,7 @@ class TransformerModel(nn.Module):
         self.pos_embedding = nn.Embedding(max_seq_length, embed_size)
         
         # Add layer normalization after embeddings
-        self.layer_norm1 = nn.LayerNorm(embed_size)
+        self.layer_norm = nn.LayerNorm(embed_size)
         
         # Scale embeddings
         self.embed_scale = math.sqrt(embed_size)
@@ -30,7 +30,7 @@ class TransformerModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_size,
             nhead=num_heads,
-            dim_feedforward=embed_size * 4,
+            dim_feedforward=embed_size,
             dropout=dropout
         )
         
@@ -38,14 +38,6 @@ class TransformerModel(nn.Module):
             encoder_layer,
             num_layers=num_layers,
             norm=nn.LayerNorm(embed_size)
-        )
-        
-        # Add a projection layer before final output
-        self.projection = nn.Sequential(
-            nn.Linear(embed_size, embed_size * 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(embed_size * 2, embed_size)
         )
         
         self.fc = nn.Linear(embed_size, vocab_size)
@@ -76,7 +68,7 @@ class TransformerModel(nn.Module):
         
         # Combine and normalize embeddings
         x = self.dropout(word_embeddings + pos_embeddings)
-        x = self.layer_norm1(x)
+        x = self.layer_norm(x)
         
         # Transformer expects shape: (seq_len, batch_size, embed_size)
         x = x.transpose(0, 1) 
@@ -91,7 +83,6 @@ class TransformerModel(nn.Module):
         # Back to (batch_size, seq_len, embed_size)
         
         # Project back to vocab size
-        x = self.projection(x)
         logits = self.fc(x)
         
         return logits

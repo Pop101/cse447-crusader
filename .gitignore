@@ -1,13 +1,11 @@
 *.py[cod]
-work/
+
 output/
 submit/
 submit.zip
 
-data
-data-*
-
-*.out
-*.zip
-
-*_old*
+.data
+shakespeare.txt
+sentences.txt
+englishstuff
+node_modules

@@ -42,14 +42,16 @@ In this case, your program must
 Let's walk through how to use the example program. First we will train the model, telling the program to save intermediate results in the directory `work`:
 
 ```
-./container_run.sh python src/myprogram.py train --work_dir /job/work
+python src/myprogram.py train --work_dir work
+python src/myprogram.py train --work_dir work --train_data example/combined_data_train.txt
+
 ```
 
 Because this model doesn't actually require training, we simply saved a fake checkpoint to `work/model.checkpoint`.
 Next, we will generate predictions for the example data in `example/input.txt` and save it in `pred.txt`:
 
 ```
-./container_run_testing.sh python src/myprogram.py test --work_dir /job/work --test_data /job/data/example/input.txt --test_output /job/output/pred.txt
+python src/myprogram.py test --work_dir work --test_data example/input.txt --test_output pred.txt
 ```
 
 ## Evaluating your predictions
@@ -63,6 +65,7 @@ Let's see what the random guessing program gets:
 
 ```
 python grader/grade.py example/pred.txt example/answer.txt --verbose
+python grader/grade.py pred.txt example/answer.txt --verbose
 ```
 
 You should see a detailed answer, as well as a success rate.
@@ -70,12 +73,24 @@ You should see a detailed answer, as well as a success rate.
 
 # Submitting your project
 
-To facilitate reproducibility, we will rely on containerization via Docker.
-Essentially, we will use Docker to guarantee that we can run your program.
+To facilitate reproducibility, we will rely on containerization via Docker. Docker is used to create a consistent environment for developing and running the ML model across different systems. 
+Essentially, we will use Docker to guarantee that we can run your program. 
 If you do not have Docker installed, please install it by following [these instructions](https://docs.docker.com/get-docker/).
 We will not be doing anything very fancy with Docker.
 In fact, we provide you with a starter `Dockerfile`.
-You should install any dependencies in this Dockerfile you require to perform prediction.
+You should install any dependencies in this Dockerfile you require to perform prediction. 
+
+The current Dockerfile creates a Docker image using "pytorch/pytorch:1.6.0-cuda10.1-cudnn7-runtime" which is a very old version of pytorch. 
+You might need to **change this docker image**. Many pre-built images (which already include multiple common dependencies) are available here – [https://hub.docker.com/](https://hub.docker.com/) (e.g., tensorflow, huggingface or even a simple python base)
+
+> You can add additional packages that your code needs using a similar line: `RUN pip install numpy pandas scipy` 
+> 
+> If you are working in a Python/conda environment and have a list of packages, you can also install dependencies easily from a requirements.txt file placed in the same folder as Dockerfile. Add these two lines to the > Dockerfile to automatically install the correct versions of your project dependencies.
+> ```
+> COPY requirements.txt /job/ 
+> RUN pip install -r requirements.txt
+> ```
+> **Remember to add** `cp requirements.txt submit/requirements.txt` **in submit.sh if you are using this file.**
 
 You must submit the project to Canvas as a zip file (named without whitespace). 
 * Follow the format: **Project447GroupN.zip** where N is your Group no.

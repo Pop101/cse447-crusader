@@ -6,7 +6,21 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 # Check for MPS (Mac GPU) or CUDA
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+def get_device():
+    # CUDA first choice
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    
+    # Use MPS if avbailable and torch > 1.6
+    try:
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+    except AttributeError:
+        pass
+    
+    return torch.device("cpu")
+
+device = get_device()
 print(f"Using device: {device}")
 
 # Character-level dataset

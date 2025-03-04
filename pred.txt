@@ -3,7 +3,7 @@ rns
 rnl
 r l
 eoa
-s r
+ .,
 s i
 g i
 rlu

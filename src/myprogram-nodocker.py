@@ -183,17 +183,17 @@ if __name__ == '__main__':
                     model = TransformerPredictor.load(args.work_dir)
             else:
                 print('Instantiating Transformer Model')
-                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE, embed_size=256, num_heads=8, num_layers=3)
+                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE, embed_size=256, num_heads=8, num_layers=4)
         elif args.model == 'rnn':
             if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
                 with TimerContext('Loading RNN Model'):
                     model = RNNPredictor.load(args.work_dir)
             else:
                 print('Instantiating RNN Model')
-                model = RNNPredictor(len(vocab), CHARS_PER_SAMPLE-1, hidden_size=512, num_layers=6, num_heads=8)
+                model = RNNPredictor(len(vocab), CHARS_PER_SAMPLE, hidden_size=512, num_layers=6, num_heads=8)
 
         print('\nTraining model')
-        MIN_EPOCHS = 99999
+        MIN_EPOCHS = 100
         consecutive_no_improvement = 0
         best_loss = float('inf')
         epoch = 0

@@ -203,12 +203,13 @@ if __name__ == '__main__':
             # Build the iterator (pull-based streaming)
             train_set_tensors = stream_load_pt_glob(os.path.join(args.work_dir, 'train_tensors_*.pt')) # Read from disk (too big for ram)
 
-            train_pairs       = train_set_tensors
-            #train_pairs       = sample_stream(train_set_tensors, 0.3) # Sample 30% of the batch-sets for diversity
-            train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
-            #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
-            #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
-        
+            train_pairs  = train_set_tensors
+            #train_pairs = sample_stream(train_set_tensors, 0.3) # Sample 30% of the batch-sets for diversity
+            train_pairs  = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
+            #train_pairs = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
+            #train_pairs = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
+            train_pairs  = limerator(train_pairs, 15)
+            
             loss = model.train_epoch(tqdm(train_pairs))
             print(f"Loss: {loss}")
             # print(f"Best Loss: {model.best_loss}")

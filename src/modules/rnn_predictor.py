@@ -5,18 +5,15 @@ from torch import nn
 import os
 from typing import Iterator, List
 import math
-import warnings
 
 
 class RNNModel(nn.Module):
     def __init__(self, vocab_size, max_seq_length=100, hidden_size=256, num_layers=2, num_heads=4, dropout=0.1):
         super().__init__()
         self.max_seq_length = max_seq_length
-        
-        # Reduced hidden size that scales better
         self.hidden_size = hidden_size
         
-        # Embeddings with smaller dimensions
+        # Embeddings
         self.token_embedding = nn.Embedding(vocab_size, hidden_size)
         
         # Positional encodings (fixed, not learned)
@@ -27,17 +24,16 @@ class RNNModel(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
         
-        # Simplified RNN (use GRU instead of LSTM, unidirectional by default)
+        # RNN layer
         self.rnn = nn.GRU(
             input_size=hidden_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout if num_layers > 1 else 0,
-            batch_first=True,
-            bidirectional=False  # Unidirectional for speed
+            batch_first=True
         )
         
-        # Attention mechanism (multi-head with dropout)
+        # Attention mechanism
         self.attention = nn.MultiheadAttention(
             embed_dim=hidden_size,
             num_heads=num_heads,
@@ -46,7 +42,7 @@ class RNNModel(nn.Module):
         )
         self.attn_norm = nn.LayerNorm(hidden_size)
         
-        # Simplified projection network (single layer with activation)
+        # Projection network
         self.projection = nn.Sequential(
             nn.Linear(hidden_size, hidden_size * 2),
             nn.GELU(),
@@ -59,13 +55,12 @@ class RNNModel(nn.Module):
         self.fc = nn.Linear(hidden_size, vocab_size)
         self.dropout = nn.Dropout(dropout)
         
-        # Initialize parameters with better defaults
+        # Initialize parameters
         self._init_parameters()
         
         self.to(device)
     
     def _init_parameters(self):
-        # Initialize embeddings and linear layers for faster convergence
         nn.init.normal_(self.token_embedding.weight, mean=0, std=0.02)
         for name, p in self.named_parameters():
             if "weight" in name and "norm" not in name and "embedding" not in name:
@@ -75,13 +70,13 @@ class RNNModel(nn.Module):
                     nn.init.normal_(p, mean=0, std=0.02)
     
     def forward(self, x):
-        # Handle different input types (ensure proper tensor dimensions)
+        # Handle different input types
         if x.dim() == 1:
             x = x.unsqueeze(0)  # Add batch dimension
             
         batch_size, seq_len = x.shape
         
-        # IMPORTANT: Ensure sequence length doesn't exceed maximum allowed
+        # Ensure sequence length doesn't exceed maximum allowed
         seq_len = min(seq_len, self.max_seq_length)
         if x.size(1) > self.max_seq_length:
             x = x[:, :self.max_seq_length]
@@ -89,18 +84,16 @@ class RNNModel(nn.Module):
         # Create padding mask (1 for padding positions, 0 for actual tokens)
         padding_mask = (x == 0)
         
-        # Calculate valid sequence lengths for each item in batch
-        seq_lengths = torch.sum(~padding_mask, dim=1).cpu()
-        
-        # Ensure all sequence lengths are at least 1
-        seq_lengths = torch.clamp(seq_lengths, min=1)
-        
         # Get embeddings 
         word_embeddings = self.token_embedding(x)
         
-        # Add positional encodings, with dropout to not overfit
+        # Add positional encodings
         positions = self.pe[:seq_len].unsqueeze(0)
         x = self.dropout(word_embeddings + positions)
+        
+        # Get sequence lengths for padding
+        seq_lengths = torch.sum(~padding_mask, dim=1).cpu()
+        seq_lengths = torch.clamp(seq_lengths, min=1)
         
         # Pack padded sequence for more efficient RNN processing
         packed_x = nn.utils.rnn.pack_padded_sequence(
@@ -113,8 +106,7 @@ class RNNModel(nn.Module):
             packed_output, batch_first=True, total_length=seq_len
         )
         
-        # Create causal attention mask (only looks back, not forward)
-        seq_len = rnn_output.size(1)
+        # Create causal attention mask (triangular mask)
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
         
         # Apply attention with causal mask
@@ -123,17 +115,14 @@ class RNNModel(nn.Module):
             key=rnn_output,
             value=rnn_output,
             key_padding_mask=padding_mask,
-            attn_mask=causal_mask  # Causal mask prevents attending to future tokens
+            attn_mask=causal_mask
         )
         
         # Add residual connection and normalization
         attn_output = self.attn_norm(rnn_output + attn_output)
         
-        # MODIFIED: Apply projection to all sequence positions, not just the last one
-        # Reshape for efficient batch processing
-        flat_attn_output = attn_output.reshape(-1, self.hidden_size)
-        flat_projected = self.projection(flat_attn_output)
-        projected = flat_projected.reshape(batch_size, seq_len, self.hidden_size)
+        # Apply projection to all sequence positions
+        projected = self.projection(attn_output)
         
         # Get logits for all positions
         logits = self.fc(projected)
@@ -156,7 +145,6 @@ class RNNPredictor(AbstractPredictor):
             self.model.parameters(),
             lr=0.01,
             betas=(0.9, 0.999),
-            eps=1e-8,
             weight_decay=0.01
         )
         
@@ -191,12 +179,6 @@ class RNNPredictor(AbstractPredictor):
         """
         Train the model for one epoch using causal language modeling.
         Each token tries to predict the next token in the sequence.
-        
-        Args:
-            sequence_iterator: Iterator yielding batches of sequences [batch_size, seq_len]
-            
-        Returns:
-            Average loss for the epoch
         """
         self.model.train()
         epoch_loss, epoch_batches = 0, 0
@@ -204,152 +186,51 @@ class RNNPredictor(AbstractPredictor):
         # Zero gradients at the beginning
         self.optimizer.zero_grad(set_to_none=True)
         
-        # Batched processing with mixed precision
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
-        
         for i, sequences in enumerate(sequence_iterator):
             try:
-                # sequences is a batch of sequences [batch_size, seq_len]
                 batch_size, seq_len = sequences.size()
                 
-                # IMPORTANT: Ensure sequence length doesn't exceed maximum allowed
+                # Ensure sequence length doesn't exceed maximum allowed
                 if seq_len > self.max_seq_length:
-                    print(f"Warning: Sequence length {seq_len} exceeds max_seq_length {self.max_seq_length}. Truncating.")
                     sequences = sequences[:, :self.max_seq_length]
                     seq_len = self.max_seq_length
                 
                 # Safety check - ensure no out-of-range indices
                 if torch.max(sequences) >= self.vocab_size:
-                    print(f"Warning: Input contains indices >= vocab_size ({torch.max(sequences).item()} >= {self.vocab_size})")
-                    # Clamp values to valid range
                     sequences = torch.clamp(sequences, 0, self.vocab_size - 1)
                 
                 # Move to device
                 sequences = sequences.to(device)
                 
                 # Create target sequences (shifted input)
-                targets = torch.zeros_like(sequences)
-                if seq_len > 1:
-                    targets[:, :-1] = sequences[:, 1:]  # target is next token
+                input_seq = sequences
+                target_seq = torch.zeros_like(sequences)
                 
-                # Use automatic mixed precision for faster computation
-                if scaler:
-                    with torch.cuda.amp.autocast():
-                        # Forward pass to get predictions for all positions
-                        output = self.model(sequences)  # [batch_size, seq_len, vocab_size]
-                        
-                        # Create valid position mask (we don't predict after the last valid token)
-                        valid_pos_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=sequences.device)
-                        for b in range(batch_size):
-                            # Find the last non-zero token position
-                            non_zeros = (sequences[b] > 0).nonzero(as_tuple=True)[0]
-                            if len(non_zeros) > 0:
-                                # -1 because we don't predict after the last position
-                                last_valid_pos = min(non_zeros[-1].item(), seq_len - 2)
-                                valid_pos_mask[b, :last_valid_pos+1] = True
-                        
-                        # Create target mask (positions where target is not padding)
-                        target_mask = (targets > 0)
-                        
-                        # Final mask combines both conditions
-                        final_mask = valid_pos_mask & target_mask
-                        
-                        # Reshape for loss calculation
-                        flat_output = output.reshape(-1, self.vocab_size)
-                        flat_targets = targets.reshape(-1)
-                        flat_mask = final_mask.reshape(-1)
-                        
-                        # Skip batch if no valid positions
-                        if not torch.any(flat_mask):
-                            print("Warning: No valid positions in batch, skipping")
-                            continue
-                        
-                        # Gather only valid positions
-                        masked_indices = torch.nonzero(flat_mask).squeeze(1)
-                        if masked_indices.numel() == 0:
-                            print("Warning: No valid indices after masking, skipping batch")
-                            continue
-                            
-                        # Safely select the valid outputs and targets
-                        masked_output = flat_output[masked_indices]
-                        masked_targets = flat_targets[masked_indices]
-                        
-                        # Double-check targets are valid
-                        if torch.any(masked_targets >= self.vocab_size):
-                            print(f"Warning: Target indices out of range, clamping")
-                            masked_targets = torch.clamp(masked_targets, 0, self.vocab_size - 1)
-                        
-                        # Calculate loss
-                        loss = self.criterion(masked_output, masked_targets)
-                    
-                    # Scale loss and gradients for mixed precision
-                    scaled_loss = loss / self.accumulation_steps
-                    scaler.scale(scaled_loss).backward()
-                    
-                    # Update weights every accumulation_steps
-                    if (i + 1) % self.accumulation_steps == 0:
-                        # Clip gradients
-                        scaler.unscale_(self.optimizer)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                        
-                        # Optimizer step with scaling
-                        scaler.step(self.optimizer)
-                        scaler.update()
-                        
-                        self.optimizer.zero_grad(set_to_none=True)
-                else:
-                    # Standard precision training (fallback)
-                    # Forward pass
-                    output = self.model(sequences)
-                    
-                    # Create valid position mask
-                    valid_pos_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=sequences.device)
-                    for b in range(batch_size):
-                        # Find the last non-zero token position
-                        non_zeros = (sequences[b] > 0).nonzero(as_tuple=True)[0]
-                        if len(non_zeros) > 0:
-                            # -1 because we don't predict after the last position
-                            last_valid_pos = min(non_zeros[-1].item(), seq_len - 2)
-                            valid_pos_mask[b, :last_valid_pos+1] = True
-                    
-                    # Create target mask (positions where target is not padding)
-                    target_mask = (targets > 0)
-                    
-                    # Final mask combines both conditions
-                    final_mask = valid_pos_mask & target_mask
-                    
-                    # Reshape for loss calculation
-                    flat_output = output.reshape(-1, self.vocab_size)
-                    flat_targets = targets.reshape(-1)
-                    flat_mask = final_mask.reshape(-1)
-                    
-                    # Skip batch if no valid positions
-                    if not torch.any(flat_mask):
-                        print("Warning: No valid positions in batch, skipping")
-                        continue
-                    
-                    # Gather only valid positions
-                    masked_indices = torch.nonzero(flat_mask).squeeze(1)
-                    if len(masked_indices) == 0:
-                        print("Warning: No valid indices after masking, skipping batch")
-                        continue
-                        
-                    # Safely select the valid outputs and targets
-                    masked_output = flat_output[masked_indices]
-                    masked_targets = flat_targets[masked_indices]
-                    
-                    # Calculate loss and backprop
-                    loss = self.criterion(masked_output, masked_targets)
-                    
-                    scaled_loss = loss / self.accumulation_steps
-                    scaled_loss.backward()
-                    
-                    if (i + 1) % self.accumulation_steps == 0:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                        self.optimizer.step()
-                        self.optimizer.zero_grad(set_to_none=True)
+                if seq_len > 1:
+                    # For causal LM: target is the next token for each position
+                    target_seq[:, :-1] = sequences[:, 1:]
+                
+                # Forward pass
+                logits = self.model(input_seq)
+                
+                # Simplified loss calculation:
+                # 1. Reshape logits and targets for loss calculation
+                flat_logits = logits.view(-1, self.vocab_size)
+                flat_targets = target_seq.view(-1)
+                
+                # 2. Calculate the loss (CrossEntropyLoss will ignore padding tokens)
+                loss = self.criterion(flat_logits, flat_targets)
+                
+                # Scale loss for gradient accumulation
+                scaled_loss = loss / self.accumulation_steps
+                scaled_loss.backward()
+                
+                # Update weights every accumulation_steps
+                if (i + 1) % self.accumulation_steps == 0:
+                    # Clip gradients
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
                 
                 # Track metrics
                 epoch_loss += loss.item()
@@ -363,20 +244,13 @@ class RNNPredictor(AbstractPredictor):
         
         # Handle any remaining gradients
         if epoch_batches % self.accumulation_steps != 0 and epoch_batches > 0:
-            if scaler:
-                scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                scaler.step(self.optimizer)
-                scaler.update()
-            else:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                self.optimizer.step()
-            
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
         
         # Calculate average loss for scheduler
         avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
-        self.scheduler.step(avg_loss)  # Update scheduler based on loss
+        self.scheduler.step(avg_loss)
         
         # Update tracking metrics
         self.best_loss = min(self.best_loss, avg_loss)
@@ -387,13 +261,6 @@ class RNNPredictor(AbstractPredictor):
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[List[int]]:
         """
         Generate predictions for the next token after each sequence.
-        
-        Args:
-            data: List of input tensors (sequences)
-            temperature: Temperature for sampling (higher = more random)
-            
-        Returns:
-            List of lists containing top-k token indices for each sequence
         """
         self.model.eval()
         preds = []
@@ -412,16 +279,15 @@ class RNNPredictor(AbstractPredictor):
                     
                     # Safety check for out-of-range indices
                     if torch.max(item) >= self.vocab_size:
-                        print(f"Warning: Input contains indices >= vocab_size ({torch.max(item).item()} >= {self.vocab_size})")
                         item = torch.clamp(item, 0, self.vocab_size - 1)
                     
                     # Move to device
                     item = item.to(device)
                     
-                    # Get model predictions for all positions
-                    output = self.model(item)  # [batch_size, seq_len, vocab_size]
+                    # Get model predictions
+                    output = self.model(item)
                     
-                    batch_size, seq_len = item.size()
+                    batch_size, seq_len, _ = output.size()
                     batch_predictions = []
                     
                     for b in range(batch_size):
@@ -445,17 +311,14 @@ class RNNPredictor(AbstractPredictor):
                             
                             # Convert to Python list
                             top_indices = top_indices.cpu().tolist()
-                            
-                            # Add to batch predictions
                             batch_predictions.append(top_indices)
                         else:
-                            # If no non-zero tokens, return prediction for first position
+                            # If no non-zero tokens, use first position
                             logits = output[b, 0]
                             scaled_logits = logits / temperature
                             probs = torch.softmax(scaled_logits, dim=-1)
                             _, top_indices = torch.topk(probs, min(3, self.vocab_size))
-                            top_indices = top_indices.cpu().tolist()
-                            batch_predictions.append(top_indices)
+                            batch_predictions.append(top_indices.cpu().tolist())
                     
                     # Add batch predictions to overall predictions
                     if batch_predictions:
@@ -471,7 +334,6 @@ class RNNPredictor(AbstractPredictor):
         return preds
 
     def save(self, work_dir):
-        # Save model state and configuration more efficiently
         state = {
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),

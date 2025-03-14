@@ -5,6 +5,7 @@ import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from tqdm.auto import tqdm
 
+from modules.abstract_predictor import AbstractPredictor
 from modules.simple_predictors import UniformRandomPredictor, WeightedRandomPredictor
 from modules.dataloader import FixedLengthDataloader, NgramDataloader, SymlinkTestTrainSplit
 from modules.normalizer import GutenbergNormalizer, StemmerNormalizer, TokenizerNormalizer, StringNormalizer, ASCIINormalizer
@@ -37,6 +38,35 @@ BATCH_SIZE = 512
 BATCHES_PER_FILE = 5_000
 
 limerator = lambda iter, max_n: map(lambda x: x[0], zip(iter, range(max_n)))
+
+
+def quick_eval(model:AbstractPredictor, vocab:dict, vocab_list:list, verbose=False):
+    # Load example data
+    with open('example/answer.txt') as f: 
+        output_data = [x.strip() for x in f.readlines()]
+        
+    test_data = []
+    with open('example/input.txt') as f:
+        for line in f:
+            norm_line = combined_normalizer(line)
+            norm_line = norm_line[-CHARS_PER_SAMPLE:] if len(norm_line) > CHARS_PER_SAMPLE else norm_line
+            test_data.append(combined_normalizer(line))
+    test_data_stream = stream_to_tensors(test_data, CHARS_PER_SAMPLE, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
+    test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
+        
+    print('Making predictions')
+    pred_tensors = model.run_pred(test_data_stream)
+    pred = ["".join([vocab_list[i] for i in p]) if p != None else 'xxx' for p in pred_tensors]
+    
+    # Count number of correct predictions
+    correct = 0
+    for i, (pred, answer) in enumerate(zip(pred, output_data)):
+        if answer.lower().strip() in pred.lower().strip():
+            correct += 1
+        elif verbose:
+            print(f"Example {i} failed: '{pred}' not contains '{answer}'")
+    print(f"Accuracy: {correct}/{len(output_data)} ({correct/len(output_data)*100:.2f}%)")
+    return correct/len(output_data)
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
@@ -144,6 +174,7 @@ if __name__ == '__main__':
         with TimerContext('Loading vocab'):
             with open(os.path.join(args.work_dir, 'vocab.pkl'), 'rb') as f:
                 vocab = pickle.load(f)
+            vocab_list = list(vocab.keys())
             print(f"\tVocab contains {len(vocab)} characters")
 
         if args.model == 'transformer':
@@ -177,7 +208,7 @@ if __name__ == '__main__':
             train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
             #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
             #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
-            train_pairs = limerator(train_pairs, 100)
+
             loss = model.train_epoch(tqdm(train_pairs))
             print(f"Loss: {loss}")
             # print(f"Best Loss: {model.best_loss}")
@@ -193,6 +224,9 @@ if __name__ == '__main__':
             print('Saving model')
             model.save(args.work_dir)
             epoch += 1
+            
+            print('Evaluate model')
+            quick_eval(model, vocab, vocab_list, verbose=False)
         
     elif args.mode == 'test':
         with TimerContext('Loading vocab'):
@@ -215,9 +249,9 @@ if __name__ == '__main__':
         with open(args.test_data) as f:
             for line in f:
                 norm_line = combined_normalizer(line)
-                norm_line = norm_line[-99:] if len(norm_line) > 99 else norm_line
+                norm_line = norm_line[-CHARS_PER_SAMPLE:] if len(norm_line) > CHARS_PER_SAMPLE else norm_line
                 test_data.append(combined_normalizer(line))
-        test_data_stream = stream_to_tensors(test_data, 99, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
+        test_data_stream = stream_to_tensors(test_data, CHARS_PER_SAMPLE, 1, lambda x: vocab.get(x, vocab['<UNK>'])[0])
         test_data_stream = map(lambda x: x.to(device).squeeze(0), test_data_stream)
         
         print('Making predictions')

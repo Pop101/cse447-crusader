@@ -4,7 +4,6 @@ from modules.rnn_predictor import RNNPredictor
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-parser.add_argument('mode', choices=('prepare', 'process', 'train', 'test', 'tui'), help='what to run')
 parser.add_argument('--work_dir', help='where to save', default='work')
 parser.add_argument('--model', choices=('rnn', 'transformer'), help='what model to use', default='transformer')
 parser.add_argument('--learning_rate', help='If we should reset the LR', default=None)

@@ -267,7 +267,7 @@ class TransformerPredictor(AbstractPredictor):
             self.best_loss = min(self.best_loss, avg_loss)
             self.total_batches += epoch_batches
             
-            return avg_loss
+        return avg_loss
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         """

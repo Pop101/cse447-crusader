@@ -265,7 +265,7 @@ class TransformerPredictor(AbstractPredictor):
             avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
             
             # Update scheduler
-            self.scheduler.step(avg_loss)
+            self.scheduler.step()
             self.best_loss = min(self.best_loss, avg_loss)
             self.total_batches += epoch_batches
             

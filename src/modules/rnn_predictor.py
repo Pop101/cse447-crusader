@@ -253,7 +253,7 @@ class RNNPredictor(AbstractPredictor):
         
         # Calculate average loss for scheduler
         avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
-        self.scheduler.step(avg_loss)
+        self.scheduler.step()
         
         # Update tracking metrics
         self.best_loss = min(self.best_loss, avg_loss)

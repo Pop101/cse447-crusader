@@ -177,8 +177,8 @@ if __name__ == '__main__':
             train_pairs       = chain.from_iterable(train_pairs) # Flatten (we have a list of batches, flatten to just batches)
             #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
             #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
-            train_pairs       = create_sequence_pairs(train_pairs, CHARS_PER_SAMPLE) # Create fixed length sequences
-            
+            train_pairs = limerator(train_pairs, 100)
+            print(next(train_pairs).shape)
             loss = model.train_epoch(tqdm(train_pairs))
             print(f"Loss: {loss}")
             # print(f"Best Loss: {model.best_loss}")

@@ -46,7 +46,7 @@ Preparing Data...
 
 if [[ ! -f ./work/train.parquet ]]; then
     echo "train.parquet not found. Running data preparation..."
-    python3 src/myprogram-nodocker.py prepare --work_dir work --data_dir /gscratch/scrubbed/gutenberg
+    python3 src/myprogram-nodocker.py prepare --work_dir work --data_dir /gscratch/scrubbed/multilingualtransformer
     echo "Done preparing!"
 else
     echo "train.parquet already exists. Skipping data preparation."
@@ -54,7 +54,20 @@ fi
 
 echo "
 --------------------
+Preparing Data...
+"
+
+if [[ ! -f ./work/train_tensors_0.pt ]]; then
+    echo "train tensors not found. Running data processing"
+    python3 src/myprogram-nodocker.py process --work_dir work --data_dir /gscratch/scrubbed/multilingualtransformer
+    echo "Done preparing!"
+else
+    echo "train tensors found already exists. Skipping data processing."
+fi
+
+echo "
+--------------------
 Training...
 "
 
-python3 src/myprogram-nodocker.py train --work_dir work --data_dir /gscratch/scrubbed/gutenberg
+python3 src/myprogram-nodocker.py train --work_dir ./work --model transformer

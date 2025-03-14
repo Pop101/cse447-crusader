@@ -51,7 +51,7 @@ if __name__ == '__main__':
             print(f"\tVocab contains {len(vocab)} characters")
             
         with TimerContext('Loading model'):
-            model = RNNPredictor.load(args.work_dir)
+            model = TransformerPredictor.load(args.work_dir)
             print(f"\tModel loaded, total batches: {model.total_batches}")
         
         print('Loading test data from {}'.format(args.test_data))
@@ -81,7 +81,7 @@ if __name__ == '__main__':
             print(f"\tVocab contains {len(vocab)} characters")
             
         with TimerContext('Loading model'):
-            model = TransformerPredictor.load(args.work_dir)
+            model = RNNPredictor.load(args.work_dir)
         
         while True:
             line = input('Input: ')

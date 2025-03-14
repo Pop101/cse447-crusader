@@ -3,6 +3,7 @@ work/
 output/
 submit/
 submit.zip
+preprocessing/blog/blogs/*
 
 data
 data-*

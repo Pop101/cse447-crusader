@@ -3,9 +3,10 @@ from modules.torchgpu import device
 import torch
 from torch import nn
 import os
-from typing import Iterator, Tuple, List
+from typing import Iterator, List
 import math
 import warnings
+
 
 class RNNModel(nn.Module):
     def __init__(self, vocab_size, max_seq_length=100, hidden_size=256, num_layers=2, num_heads=4, dropout=0.1):
@@ -80,11 +81,19 @@ class RNNModel(nn.Module):
             
         batch_size, seq_len = x.shape
         
+        # IMPORTANT: Ensure sequence length doesn't exceed maximum allowed
+        seq_len = min(seq_len, self.max_seq_length)
+        if x.size(1) > self.max_seq_length:
+            x = x[:, :self.max_seq_length]
+        
         # Create padding mask (1 for padding positions, 0 for actual tokens)
         padding_mask = (x == 0)
         
         # Calculate valid sequence lengths for each item in batch
         seq_lengths = torch.sum(~padding_mask, dim=1).cpu()
+        
+        # Ensure all sequence lengths are at least 1
+        seq_lengths = torch.clamp(seq_lengths, min=1)
         
         # Get embeddings 
         word_embeddings = self.token_embedding(x)
@@ -118,17 +127,15 @@ class RNNModel(nn.Module):
         )
         
         # Add residual connection and normalization
-        attn_output = rnn_output + attn_output
+        attn_output = self.attn_norm(rnn_output + attn_output)
         
-        # Get hidden state from last relevant position for each sequence
-        batch_indices = torch.arange(batch_size, device=x.device)
-        last_indices = seq_lengths - 1
-        last_indices = torch.clamp(last_indices, min=0)
-        final_hidden = attn_output[batch_indices, last_indices]
-        final_hidden = self.attn_norm(final_hidden)
+        # MODIFIED: Apply projection to all sequence positions, not just the last one
+        # Reshape for efficient batch processing
+        flat_attn_output = attn_output.reshape(-1, self.hidden_size)
+        flat_projected = self.projection(flat_attn_output)
+        projected = flat_projected.reshape(batch_size, seq_len, self.hidden_size)
         
-        # Apply simplified projection network
-        projected = self.projection(final_hidden)
+        # Get logits for all positions
         logits = self.fc(projected)
         
         return logits
@@ -180,58 +187,196 @@ class RNNPredictor(AbstractPredictor):
         # Training parameters
         self.accumulation_steps = accumulation_steps
   
-    def train_epoch(self, pair_iterator:Iterator[Tuple[torch.Tensor, torch.Tensor]]) -> float:
+    def train_epoch(self, sequence_iterator: Iterator[torch.Tensor]) -> float:
+        """
+        Train the model for one epoch using causal language modeling.
+        Each token tries to predict the next token in the sequence.
+        
+        Args:
+            sequence_iterator: Iterator yielding batches of sequences [batch_size, seq_len]
+            
+        Returns:
+            Average loss for the epoch
+        """
         self.model.train()
         epoch_loss, epoch_batches = 0, 0
+        
+        # Zero gradients at the beginning
+        self.optimizer.zero_grad(set_to_none=True)
         
         # Batched processing with mixed precision
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
         
-        for i, (X, y) in enumerate(pair_iterator):
-            # Use automatic mixed precision for faster computation
-            if scaler:
-                with torch.cuda.amp.autocast():
+        for i, sequences in enumerate(sequence_iterator):
+            try:
+                # sequences is a batch of sequences [batch_size, seq_len]
+                batch_size, seq_len = sequences.size()
+                
+                # IMPORTANT: Ensure sequence length doesn't exceed maximum allowed
+                if seq_len > self.max_seq_length:
+                    print(f"Warning: Sequence length {seq_len} exceeds max_seq_length {self.max_seq_length}. Truncating.")
+                    sequences = sequences[:, :self.max_seq_length]
+                    seq_len = self.max_seq_length
+                
+                # Safety check - ensure no out-of-range indices
+                if torch.max(sequences) >= self.vocab_size:
+                    print(f"Warning: Input contains indices >= vocab_size ({torch.max(sequences).item()} >= {self.vocab_size})")
+                    # Clamp values to valid range
+                    sequences = torch.clamp(sequences, 0, self.vocab_size - 1)
+                
+                # Move to device
+                sequences = sequences.to(device)
+                
+                # Create target sequences (shifted input)
+                targets = torch.zeros_like(sequences)
+                if seq_len > 1:
+                    targets[:, :-1] = sequences[:, 1:]  # target is next token
+                
+                # Use automatic mixed precision for faster computation
+                if scaler:
+                    with torch.cuda.amp.autocast():
+                        # Forward pass to get predictions for all positions
+                        output = self.model(sequences)  # [batch_size, seq_len, vocab_size]
+                        
+                        # Create valid position mask (we don't predict after the last valid token)
+                        valid_pos_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=sequences.device)
+                        for b in range(batch_size):
+                            # Find the last non-zero token position
+                            non_zeros = (sequences[b] > 0).nonzero(as_tuple=True)[0]
+                            if len(non_zeros) > 0:
+                                # -1 because we don't predict after the last position
+                                last_valid_pos = min(non_zeros[-1].item(), seq_len - 2)
+                                valid_pos_mask[b, :last_valid_pos+1] = True
+                        
+                        # Create target mask (positions where target is not padding)
+                        target_mask = (targets > 0)
+                        
+                        # Final mask combines both conditions
+                        final_mask = valid_pos_mask & target_mask
+                        
+                        # Reshape for loss calculation
+                        flat_output = output.reshape(-1, self.vocab_size)
+                        flat_targets = targets.reshape(-1)
+                        flat_mask = final_mask.reshape(-1)
+                        
+                        # Skip batch if no valid positions
+                        if not torch.any(flat_mask):
+                            print("Warning: No valid positions in batch, skipping")
+                            continue
+                        
+                        # Gather only valid positions
+                        masked_indices = torch.nonzero(flat_mask).squeeze(1)
+                        if masked_indices.numel() == 0:
+                            print("Warning: No valid indices after masking, skipping batch")
+                            continue
+                            
+                        # Safely select the valid outputs and targets
+                        masked_output = flat_output[masked_indices]
+                        masked_targets = flat_targets[masked_indices]
+                        
+                        # Double-check targets are valid
+                        if torch.any(masked_targets >= self.vocab_size):
+                            print(f"Warning: Target indices out of range, clamping")
+                            masked_targets = torch.clamp(masked_targets, 0, self.vocab_size - 1)
+                        
+                        # Calculate loss
+                        loss = self.criterion(masked_output, masked_targets)
+                    
+                    # Scale loss and gradients for mixed precision
+                    scaled_loss = loss / self.accumulation_steps
+                    scaler.scale(scaled_loss).backward()
+                    
+                    # Update weights every accumulation_steps
+                    if (i + 1) % self.accumulation_steps == 0:
+                        # Clip gradients
+                        scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        
+                        # Optimizer step with scaling
+                        scaler.step(self.optimizer)
+                        scaler.update()
+                        
+                        self.optimizer.zero_grad(set_to_none=True)
+                else:
+                    # Standard precision training (fallback)
                     # Forward pass
-                    output = self.model(X)
-                    loss = self.criterion(output, y)
-                
-                # Scale loss and gradients for mixed precision
-                scaled_loss = loss / self.accumulation_steps
-                scaler.scale(scaled_loss).backward()
-                
-                # Update weights every accumulation_steps
-                if (i + 1) % self.accumulation_steps == 0:
-                    # Clip gradients
-                    scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    output = self.model(sequences)
                     
-                    # Optimizer step with scaling
-                    scaler.step(self.optimizer)
-                    scaler.update()
+                    # Create valid position mask
+                    valid_pos_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=sequences.device)
+                    for b in range(batch_size):
+                        # Find the last non-zero token position
+                        non_zeros = (sequences[b] > 0).nonzero(as_tuple=True)[0]
+                        if len(non_zeros) > 0:
+                            # -1 because we don't predict after the last position
+                            last_valid_pos = min(non_zeros[-1].item(), seq_len - 2)
+                            valid_pos_mask[b, :last_valid_pos+1] = True
                     
-                    self.optimizer.zero_grad(set_to_none=True)
+                    # Create target mask (positions where target is not padding)
+                    target_mask = (targets > 0)
+                    
+                    # Final mask combines both conditions
+                    final_mask = valid_pos_mask & target_mask
+                    
+                    # Reshape for loss calculation
+                    flat_output = output.reshape(-1, self.vocab_size)
+                    flat_targets = targets.reshape(-1)
+                    flat_mask = final_mask.reshape(-1)
+                    
+                    # Skip batch if no valid positions
+                    if not torch.any(flat_mask):
+                        print("Warning: No valid positions in batch, skipping")
+                        continue
+                    
+                    # Gather only valid positions
+                    masked_indices = torch.nonzero(flat_mask).squeeze(1)
+                    if len(masked_indices) == 0:
+                        print("Warning: No valid indices after masking, skipping batch")
+                        continue
+                        
+                    # Safely select the valid outputs and targets
+                    masked_output = flat_output[masked_indices]
+                    masked_targets = flat_targets[masked_indices]
+                    
+                    # Calculate loss and backprop
+                    loss = self.criterion(masked_output, masked_targets)
+                    
+                    scaled_loss = loss / self.accumulation_steps
+                    scaled_loss.backward()
+                    
+                    if (i + 1) % self.accumulation_steps == 0:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        self.optimizer.step()
+                        self.optimizer.zero_grad(set_to_none=True)
+                
+                # Track metrics
+                epoch_loss += loss.item()
+                epoch_batches += 1
+                
+            except RuntimeError as e:
+                print(f"Error in batch {i}: {str(e)}")
+                torch.cuda.empty_cache()
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
+        
+        # Handle any remaining gradients
+        if epoch_batches % self.accumulation_steps != 0 and epoch_batches > 0:
+            if scaler:
+                scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                scaler.step(self.optimizer)
+                scaler.update()
             else:
-                # Standard precision training (fallback)
-                output = self.model(X)
-                loss = self.criterion(output, y)
-                
-                scaled_loss = loss / self.accumulation_steps
-                scaled_loss.backward()
-                
-                if (i + 1) % self.accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                    self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.step()
             
-            # Track metrics
-            epoch_loss += loss.item()
-            epoch_batches += 1
+            self.optimizer.zero_grad(set_to_none=True)
         
         # Calculate average loss for scheduler
         avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
-        self.scheduler.step(avg_loss)  # Update scheduler based on validation loss
+        self.scheduler.step(avg_loss)  # Update scheduler based on loss
         
         # Update tracking metrics
         self.best_loss = min(self.best_loss, avg_loss)
@@ -239,32 +384,88 @@ class RNNPredictor(AbstractPredictor):
         
         return avg_loss
     
-    def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
+    def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[List[int]]:
+        """
+        Generate predictions for the next token after each sequence.
+        
+        Args:
+            data: List of input tensors (sequences)
+            temperature: Temperature for sampling (higher = more random)
+            
+        Returns:
+            List of lists containing top-k token indices for each sequence
+        """
         self.model.eval()
         preds = []
         
         with torch.no_grad():
             for item in data:
                 try:
-                    # Run model prediction with caching for efficiency
-                    output = self.model(item)
+                    # Handle empty or None tensors
+                    if item is None:
+                        preds.append(None)
+                        continue
+                        
+                    # Add batch dimension if needed
+                    if item.dim() == 1:
+                        item = item.unsqueeze(0)
                     
-                    # Apply temperature scaling
-                    scaled_logits = output / temperature
+                    # Safety check for out-of-range indices
+                    if torch.max(item) >= self.vocab_size:
+                        print(f"Warning: Input contains indices >= vocab_size ({torch.max(item).item()} >= {self.vocab_size})")
+                        item = torch.clamp(item, 0, self.vocab_size - 1)
                     
-                    # Get top predictions without computing all softmax values
-                    top_n_values, top_n_indices = torch.topk(scaled_logits, 3, dim=-1)
+                    # Move to device
+                    item = item.to(device)
                     
-                    # Handle single item prediction
-                    indices = top_n_indices.squeeze()
-                    if indices.dim() == 0:
-                        indices = indices.unsqueeze(0)
+                    # Get model predictions for all positions
+                    output = self.model(item)  # [batch_size, seq_len, vocab_size]
                     
-                    # Add to predictions
-                    preds.append(indices)
+                    batch_size, seq_len = item.size()
+                    batch_predictions = []
+                    
+                    for b in range(batch_size):
+                        # Find the last non-zero token position
+                        non_zeros = (item[b] > 0).nonzero(as_tuple=True)[0]
+                        
+                        if len(non_zeros) > 0:
+                            # Get the position of the last non-zero token
+                            last_pos = min(non_zeros[-1].item(), seq_len - 1)
+                            
+                            # Get prediction for this position
+                            logits = output[b, last_pos]
+                            
+                            # Apply temperature
+                            scaled_logits = logits / temperature
+                            probs = torch.softmax(scaled_logits, dim=-1)
+                            
+                            # Get top-k predictions
+                            k = min(3, self.vocab_size)
+                            _, top_indices = torch.topk(probs, k)
+                            
+                            # Convert to Python list
+                            top_indices = top_indices.cpu().tolist()
+                            
+                            # Add to batch predictions
+                            batch_predictions.append(top_indices)
+                        else:
+                            # If no non-zero tokens, return prediction for first position
+                            logits = output[b, 0]
+                            scaled_logits = logits / temperature
+                            probs = torch.softmax(scaled_logits, dim=-1)
+                            _, top_indices = torch.topk(probs, min(3, self.vocab_size))
+                            top_indices = top_indices.cpu().tolist()
+                            batch_predictions.append(top_indices)
+                    
+                    # Add batch predictions to overall predictions
+                    if batch_predictions:
+                        preds.append(batch_predictions[0] if len(batch_predictions) == 1 else batch_predictions)
+                    else:
+                        preds.append(None)
+                    
                 except Exception as e:
-                    preds.append(None)
                     print(f"Warning: Error in prediction: {str(e)}")
+                    preds.append(None)
                     continue
                     
         return preds

@@ -152,7 +152,7 @@ if __name__ == '__main__':
                     model = TransformerPredictor.load(args.work_dir)
             else:
                 print('Instantiating Transformer Model')
-                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE-1, embed_size=256, num_heads=8, num_layers=3)
+                model = TransformerPredictor(len(vocab), CHARS_PER_SAMPLE, embed_size=256, num_heads=8, num_layers=3)
         elif args.model == 'rnn':
             if os.path.exists(os.path.join(args.work_dir, 'RNNPredictor.pt')):
                 with TimerContext('Loading RNN Model'):
@@ -178,7 +178,6 @@ if __name__ == '__main__':
             #train_pairs       = sample_stream(train_pairs, 0.3) # Sample 30% of the batches for more diversity
             #train_pairs       = create_random_length_sequence_pairs(train_pairs, 1, 100) # Create variable length sequences
             train_pairs = limerator(train_pairs, 100)
-            print(next(train_pairs).shape)
             loss = model.train_epoch(tqdm(train_pairs))
             print(f"Loss: {loss}")
             # print(f"Best Loss: {model.best_loss}")

@@ -57,16 +57,27 @@ class TransformerModel(nn.Module):
             
         batch_size, seq_len = x.shape
         
+        # IMPORTANT FIX 1: Ensure sequence length doesn't exceed maximum allowed
+        seq_len = min(seq_len, self.max_seq_length)
+        
+        # Safety check - ensure no out-of-range indices
+        if torch.max(x) >= self.token_embedding.num_embeddings:
+            print(f"Warning: Input contains indices >= vocab_size ({torch.max(x).item()} >= {self.token_embedding.num_embeddings})")
+            # Clamp values to valid range
+            x = torch.clamp(x, 0, self.token_embedding.num_embeddings - 1)
+        
         # Find valid sequence lengths (non-padding tokens)
-        # This helps us handle variable-length sequences properly
         seq_lengths = torch.sum(x > 0, dim=1)
+        seq_lengths = torch.clamp(seq_lengths, min=0, max=seq_len)
         
         # Create padding mask (1 for padding, 0 for actual tokens)
-        # For right-padded sequences, padding tokens are zeros at the end
         padding_mask = (x == 0)
         
         # Create position indices
         positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
+        
+        # IMPORTANT FIX 2: Ensure position indices are within bounds
+        positions = torch.clamp(positions, 0, self.pos_embedding.num_embeddings - 1)
         
         # Apply token embeddings with scaling
         token_emb = self.token_embedding(x) * self.embed_scale
@@ -84,17 +95,21 @@ class TransformerModel(nn.Module):
         x = x.transpose(0, 1)
         
         # Generate causal mask to prevent attending to future tokens
-        # For right-padded sequences, this ensures tokens only attend to previous tokens
         causal_mask = self._generate_causal_mask(seq_len, x.device)
         
         # Apply transformer with both causal and padding masks
-        # - causal_mask ensures each token only attends to previous tokens
-        # - padding_mask ensures we ignore padding tokens completely
-        x = self.transformer(
-            x,
-            mask=causal_mask,
-            src_key_padding_mask=padding_mask
-        )
+        try:
+            x = self.transformer(
+                x,
+                mask=causal_mask,
+                src_key_padding_mask=padding_mask
+            )
+        except RuntimeError as e:
+            # Provide more information about the error
+            print(f"Error in transformer: {str(e)}")
+            print(f"x shape: {x.shape}, causal_mask shape: {causal_mask.shape}, padding_mask shape: {padding_mask.shape}")
+            # Re-raise to allow caller to handle
+            raise e
         
         # Transpose back: [seq_len, batch_size, embed_size] -> [batch_size, seq_len, embed_size]
         x = x.transpose(0, 1)
@@ -103,7 +118,7 @@ class TransformerModel(nn.Module):
         logits = self.fc(x)
         
         return logits
-    
+        
 class TransformerPredictor(AbstractPredictor):
     def __init__(self, vocab_size, max_seq_length, embed_size, num_heads, num_layers, accumulation_steps=4) -> None:
         super().__init__()
@@ -152,63 +167,77 @@ class TransformerPredictor(AbstractPredictor):
                 # sequences is a batch of sequences [batch_size, seq_len]
                 batch_size, seq_len = sequences.size()
                 
-                # Create targets by shifting input one position left
-                # For a sequence [a,b,c,d,0,0], the targets would be [b,c,d,0,0,0]
+                # IMPORTANT FIX 3: Ensure sequence length doesn't exceed model's max_seq_length
+                if seq_len > self.max_seq_length:
+                    print(f"Warning: Sequence length {seq_len} exceeds max_seq_length {self.max_seq_length}. Truncating.")
+                    sequences = sequences[:, :self.max_seq_length]
+                    seq_len = self.max_seq_length
+                
+                # Safety check - ensure no out-of-range indices
+                if torch.max(sequences) >= self.vocab_size:
+                    print(f"Warning: Input contains indices >= vocab_size ({torch.max(sequences).item()} >= {self.vocab_size})")
+                    # Clamp values to valid range
+                    sequences = torch.clamp(sequences, 0, self.vocab_size - 1)
+                
+                # IMPORTANT FIX 4: Ensure sequences are on the correct device
+                sequences = sequences.to(device)
+                
+                # Create target sequences (shifted input)
                 targets = torch.zeros_like(sequences)
-                if seq_len > 1:  # Only shift if sequence length > 1
+                if seq_len > 1:
                     targets[:, :-1] = sequences[:, 1:]
                 
-                # Forward pass - get predictions for each position
+                # Forward pass through model
                 output = self.model(sequences)  # [batch_size, seq_len, vocab_size]
                 
-                # Create a mask for positions where we have valid targets (not padding)
-                # For causal LM, we only predict positions where the target is non-zero
-                # and we don't predict for the last position (which has no next token)
-                mask = (targets > 0)
-                
-                # We also don't want to include predictions for positions after valid sequence ends
-                # First, get valid sequence lengths for each item in batch
-                seq_lengths = torch.sum(sequences > 0, dim=1)
-                
-                # Adjust mask to only include positions within valid sequence length - 1
-                # (since we're predicting the next token)
-                valid_positions_mask = torch.zeros_like(mask, dtype=torch.bool)
+                # We will only compute loss on non-padding tokens
+                valid_pos_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=sequences.device)
                 for b in range(batch_size):
-                    # Only include positions up to valid sequence length - 1
-                    # This ensures we're not trying to predict beyond the sequence
-                    valid_length = max(0, min(seq_lengths[b].item() - 1, seq_len - 1))
-                    valid_positions_mask[b, :valid_length] = True
+                    # Find the last non-zero token position
+                    non_zeros = (sequences[b] > 0).nonzero(as_tuple=True)[0]
+                    if len(non_zeros) > 0:
+                        # -1 because we don't predict after the last position
+                        last_valid_pos = min(non_zeros[-1].item(), seq_len - 2)
+                        valid_pos_mask[b, :last_valid_pos+1] = True
                 
-                # Final mask is where we have both valid targets and valid positions
-                final_mask = mask & valid_positions_mask
+                # Create target mask (positions where target is not padding)
+                target_mask = (targets > 0)
+                
+                # Final mask combines both conditions
+                final_mask = valid_pos_mask & target_mask
                 
                 # Reshape for loss calculation
-                flat_output = output.reshape(-1, self.vocab_size)  # [batch_size*seq_len, vocab_size]
-                flat_targets = targets.reshape(-1)                 # [batch_size*seq_len]
-                flat_mask = final_mask.reshape(-1)                 # [batch_size*seq_len]
+                flat_output = output.reshape(-1, self.vocab_size)
+                flat_targets = targets.reshape(-1)
+                flat_mask = final_mask.reshape(-1)
                 
-                # Skip batch if no valid predictions
+                # Skip batch if no valid positions
                 if not torch.any(flat_mask):
-                    print("Warning: No valid prediction positions in batch, skipping")
+                    print("Warning: No valid positions in batch, skipping")
                     continue
                 
-                # Select only the positions we want to predict
-                masked_output = flat_output[flat_mask]
-                masked_targets = flat_targets[flat_mask]
+                # IMPORTANT FIX 5: Safer approach to masked selection
+                masked_indices = torch.nonzero(flat_mask).squeeze(1)
+                if masked_indices.numel() == 0:
+                    print("Warning: No valid indices after masking, skipping batch")
+                    continue
+                    
+                # Safely select the valid outputs and targets
+                masked_output = flat_output[masked_indices]
+                masked_targets = flat_targets[masked_indices]
                 
-                # Safety check to ensure we're not going out of bounds
-                if masked_targets.max() >= self.vocab_size:
-                    print(f"Warning: Target indices exceed vocabulary size: {masked_targets.max()} >= {self.vocab_size}")
-                    # Clamp targets to valid range
+                # Double-check targets are valid
+                if torch.any(masked_targets >= self.vocab_size):
+                    print(f"Warning: Target indices out of range, clamping")
                     masked_targets = torch.clamp(masked_targets, 0, self.vocab_size - 1)
                 
-                # Calculate loss with gradient accumulation
+                # Calculate loss and backprop
                 loss = self.criterion(masked_output, masked_targets) / self.accumulation_steps
                 loss.backward()
-                
+                    
                 # Update weights after accumulation_steps
                 if (i + 1) % self.accumulation_steps == 0:
-                    # Clip gradients to prevent exploding gradients
+                    # Clip gradients
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     self.optimizer.step()
                     self.optimizer.zero_grad()
@@ -219,34 +248,26 @@ class TransformerPredictor(AbstractPredictor):
                 epoch_batches += 1
                 
             except RuntimeError as e:
-                if "out of memory" in str(e).lower() or "illegal memory" in str(e).lower():
-                    print(f"WARNING: CUDA memory error, skipping batch {i}")
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    self.optimizer.zero_grad()  # Clear gradients to avoid accumulation
-                    continue
-                else:
-                    print(f"Error in batch {i}: {str(e)}")
-                    # Try to recover if possible
-                    self.optimizer.zero_grad()
-                    torch.cuda.empty_cache()
-                    continue
-                    
-        # Handle any remaining gradients
-        if epoch_batches % self.accumulation_steps != 0:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-        
-        # Calculate average loss
-        avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
-        
-        # Update scheduler
-        self.scheduler.step(avg_loss)
-        self.best_loss = min(self.best_loss, avg_loss)
-        self.total_batches += epoch_batches
-        
-        return avg_loss
+                print(f"Error in batch {i}: {str(e)}")
+                torch.cuda.empty_cache()
+                self.optimizer.zero_grad()
+                continue
+            
+            # Handle any remaining gradients
+            if epoch_batches % self.accumulation_steps != 0 and epoch_batches > 0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+            
+            # Calculate average loss
+            avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
+            
+            # Update scheduler
+            self.scheduler.step(avg_loss)
+            self.best_loss = min(self.best_loss, avg_loss)
+            self.total_batches += epoch_batches
+            
+            return avg_loss
     
     def run_pred(self, data: List[torch.Tensor], temperature=1.0) -> List[torch.Tensor]:
         """
@@ -265,48 +286,74 @@ class TransformerPredictor(AbstractPredictor):
         with torch.no_grad():
             for item in data:
                 try:
-                    # Move to device
-                    item = item.to(device)
-                    
+                    # Handle empty or None tensors
+                    if item is None:
+                        preds.append(None)
+                        continue
+                        
                     # Add batch dimension if needed
                     if item.dim() == 1:
                         item = item.unsqueeze(0)
                     
+                    # Safety check for out-of-range indices
+                    if torch.max(item) >= self.vocab_size:
+                        print(f"Warning: Input contains indices >= vocab_size ({torch.max(item).item()} >= {self.vocab_size})")
+                        item = torch.clamp(item, 0, self.vocab_size - 1)
+                    
+                    # Move to device
+                    item = item.to(device)
+                    
                     # Get model predictions
                     output = self.model(item)  # [batch_size, seq_len, vocab_size]
                     
-                    # Find the last non-padding token position for each sequence
-                    seq_lengths = torch.sum(item > 0, dim=1) - 1
+                    batch_size, seq_len = item.size()
+                    batch_predictions = []
                     
-                    # Ensure we don't go out of bounds
-                    seq_lengths = torch.clamp(seq_lengths, min=0, max=item.size(1) - 1)
+                    for b in range(batch_size):
+                        # Find the last non-zero token position
+                        non_zeros = (item[b] > 0).nonzero(as_tuple=True)[0]
+                        
+                        if len(non_zeros) > 0:
+                            # Get the position of the last non-zero token
+                            last_pos = min(non_zeros[-1].item(), seq_len - 1)
+                            
+                            # Get prediction for this position
+                            logits = output[b, last_pos]
+                            
+                            # Apply temperature
+                            scaled_logits = logits / temperature
+                            probs = torch.softmax(scaled_logits, dim=-1)
+                            
+                            # Get top-k predictions
+                            k = min(3, self.vocab_size)
+                            _, top_indices = torch.topk(probs, k)
+                            
+                            # IMPORTANT FIX: Convert to CPU and make sure it's a 1D tensor of integers
+                            top_indices = top_indices.cpu().tolist()
+                            
+                            # Add to batch predictions
+                            batch_predictions.append(top_indices)
+                        else:
+                            # If no non-zero tokens, return prediction for first position
+                            logits = output[b, 0]
+                            scaled_logits = logits / temperature
+                            probs = torch.softmax(scaled_logits, dim=-1)
+                            _, top_indices = torch.topk(probs, min(3, self.vocab_size))
+                            
+                            # IMPORTANT FIX: Convert to CPU and make sure it's a 1D list of integers
+                            top_indices = top_indices.cpu().tolist()
+                            
+                            batch_predictions.append(top_indices)
                     
-                    # Extract predictions for the last token in each sequence
-                    batch_indices = torch.arange(output.size(0), device=output.device)
-                    
-                    # Safety check to avoid out-of-bounds errors
-                    batch_indices = batch_indices[:output.size(0)]
-                    seq_lengths = seq_lengths[:output.size(0)]
-                    
-                    # Get predictions for the last valid token in each sequence
-                    last_token_output = output[batch_indices, seq_lengths]
-                    
-                    # Apply temperature scaling for sampling
-                    scaled_logits = last_token_output / temperature
-                    probs = torch.softmax(scaled_logits, dim=-1)
-                    
-                    # Get top-3 predictions
-                    _, top_indices = torch.topk(probs, min(3, self.vocab_size), dim=-1)
-                    
-                    # Move to CPU for return
-                    top_indices = top_indices.cpu()
-                    
-                    # Add to predictions list
-                    preds.append(top_indices)
+                    # Add batch predictions to overall predictions
+                    if batch_predictions:
+                        # No need to stack here since we're returning lists of integers
+                        preds.append(batch_predictions[0] if len(batch_predictions) == 1 else batch_predictions)
+                    else:
+                        preds.append(None)
                     
                 except Exception as e:
                     print(f"Warning: Error in prediction: {str(e)}")
-                    # Add None as placeholder to maintain list length
                     preds.append(None)
                     continue
                     

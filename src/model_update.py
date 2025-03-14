@@ -26,7 +26,7 @@ if args.learning_rate:
     optimizer_state = predictor.optimizer.state_dict()
 
     # Update learning rate only in existing fields
-    new_lr = 0.001  # New learning rate
+    new_lr = float(args.learning_rate)
     for group in optimizer_state['param_groups']:
         if 'lr' in group:
             group['lr'] = new_lr

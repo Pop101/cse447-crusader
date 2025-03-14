@@ -151,10 +151,10 @@ class RNNPredictor(AbstractPredictor):
         
         self.scheduler = torch.optim.lr_scheduler.CyclicLR(
             self.optimizer,
-            base_lr        = 1e-6,          # Min learning rate
+            base_lr        = 1e-4,          # Min learning rate
             max_lr         = 0.01,          # Max learning rate
-            step_size_up   = 5,             # Epochs to increase LR
-            step_size_down = 10,            # Epochs to decrease LR
+            step_size_up   = 2,             # Epochs to increase LR
+            step_size_down = 5,             # Epochs to decrease LR
             mode           = 'triangular2', # Scaling policy (amplitude decreases each cycle)
             cycle_momentum = False          # Don't adjust momentum
         )

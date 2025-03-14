@@ -143,17 +143,20 @@ class RNNPredictor(AbstractPredictor):
         
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=0.01,
-            betas=(0.9, 0.999),
-            weight_decay=0.01
+            lr           = 0.001,
+            betas        = (0.9, 0.98),
+            eps          = 1e-9,
+            weight_decay = 0.01
         )
         
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        self.scheduler = torch.optim.lr_scheduler.CyclicLR(
             self.optimizer,
-            mode='min',
-            factor=0.5,
-            patience=2,
-            min_lr=1e-6
+            base_lr        = 1e-6,          # Min learning rate
+            max_lr         = 0.01,          # Max learning rate
+            step_size_up   = 5,             # Epochs to increase LR
+            step_size_down = 10,            # Epochs to decrease LR
+            mode           = 'triangular2', # Scaling policy (amplitude decreases each cycle)
+            cycle_momentum = False          # Don't adjust momentum
         )
         
         self.criterion = nn.CrossEntropyLoss(

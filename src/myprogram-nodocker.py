@@ -225,8 +225,8 @@ if __name__ == '__main__':
             model.save(args.work_dir)
             epoch += 1
             
-            print('Evaluate model')
             quick_eval(model, vocab, vocab_list, verbose=False)
+            print('Current learning rate: ', model.optimizer.param_groups[0]['lr'])
         
     elif args.mode == 'test':
         with TimerContext('Loading vocab'):

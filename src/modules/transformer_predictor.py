@@ -255,19 +255,19 @@ class TransformerPredictor(AbstractPredictor):
                 self.optimizer.zero_grad()
                 continue
             
-            # Handle any remaining gradients
-            if epoch_batches % self.accumulation_steps != 0 and epoch_batches > 0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-            
-            # Calculate average loss
-            avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
-            
-            # Update scheduler
-            self.scheduler.step()
-            self.best_loss = min(self.best_loss, avg_loss)
-            self.total_batches += epoch_batches
+        # Handle any remaining gradients
+        if epoch_batches % self.accumulation_steps != 0 and epoch_batches > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        
+        # Calculate average loss
+        avg_loss = epoch_loss / epoch_batches if epoch_batches > 0 else float('inf')
+        
+        # Update scheduler
+        self.scheduler.step()
+        self.best_loss = min(self.best_loss, avg_loss)
+        self.total_batches += epoch_batches
             
         return avg_loss
     

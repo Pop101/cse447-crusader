@@ -45,7 +45,8 @@ class MyModel:
         self.model = CharTransformer(self.dataset.vocab_size)
         self.char_to_idx = self.dataset.char_to_idx
         self.idx_to_char = self.dataset.idx_to_char
-        train_model(self.model, self.dataset, epochs=12, batch_size=16, lr=0.0005, save_path=os.path.join(work_dir, 'model.pth'))
+        train_model(self.model, self.dataset, epochs=30, batch_size=512, lr=0.0005, save_path=os.path.join(work_dir, 'model.pth'))
+
         self.save_vocab(work_dir)
 
     def run_pred(self, data, work_dir):

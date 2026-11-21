@@ -1,5 +1,26 @@
 # CSE447-project
 
+![cse447-crusader project banner](docs/readme-cover.svg)
+
+## Table of contents
+
+- [Why this fork](#why-this-fork)
+- [Technologies](#technologies)
+- [Input format](#input-format)
+- [Output format](#output-format)
+- [Implementing your program](#implementing-your-program)
+- [Evaluating your predictions](#evaluating-your-predictions)
+- [Submitting your project](#submitting-your-project)
+- [Questions](#questions)
+
+## Why this fork
+
+Forked from [harshita-chopra/cse447-project](https://github.com/harshita-chopra/cse447-project). Hyak job and container scripts support training and evaluating a next-character predictor for the UW CSE 447 project.
+
+## Technologies
+
+[Python](https://www.python.org/) · [Docker](https://docs.docker.com/)
+
 This repo contains an example submission for the CSE447 project.
 For this project, you will develop a program that takes in a string of character and tries to predict the next character.
 For illustration purposes, this repo contains a dummy program that simply generates 3 random guesses of the next character.
